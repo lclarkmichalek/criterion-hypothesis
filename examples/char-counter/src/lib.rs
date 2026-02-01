@@ -1,12 +1,6 @@
 /// Count occurrences of a character in a string.
 pub fn count_char(s: &str, c: char) -> usize {
-    let mut count = 0;
-    for ch in s.chars() {
-        if ch == c {
-            count += 1;
-        }
-    }
-    count
+    s.chars().filter(|&ch| ch == c).count()
 }
 
 #[cfg(test)]
