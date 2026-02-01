@@ -217,6 +217,7 @@ impl BuildManager {
     ///
     /// On Unix: executable files containing "bench" in the name, without .d extension
     /// On Windows: .exe files containing "bench" in the name
+    #[allow(unused_variables)]
     fn is_benchmark_binary(&self, file_name: &str, path: &Path) -> bool {
         // Must contain "bench" in the name
         if !file_name.contains("bench") {
