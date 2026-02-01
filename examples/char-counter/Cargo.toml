@@ -1,0 +1,13 @@
+[package]
+name = "char-counter"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+criterion-hypothesis-harness = { path = "../../criterion-hypothesis-harness" }
+
+[[bench]]
+name = "char_bench"
+harness = false
+
+[workspace]
