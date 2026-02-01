@@ -47,7 +47,7 @@ struct RunIterationRequest {
 /// Response from running a benchmark iteration.
 #[derive(Serialize, Deserialize)]
 struct RunIterationResponse {
-    duration_ns: Option<u128>,
+    duration_ns: u64,
     success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
@@ -65,7 +65,7 @@ struct ShutdownResponse {
 /// Returns: { "status": "ready" }
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
-        status: "ready".to_string(),
+        status: "healthy".to_string(),
     })
 }
 
@@ -91,7 +91,7 @@ async fn run_iteration(
         Some(duration) => (
             StatusCode::OK,
             Json(RunIterationResponse {
-                duration_ns: Some(duration.as_nanos()),
+                duration_ns: duration.as_nanos() as u64,
                 success: true,
                 error: None,
             }),
@@ -99,7 +99,7 @@ async fn run_iteration(
         None => (
             StatusCode::NOT_FOUND,
             Json(RunIterationResponse {
-                duration_ns: None,
+                duration_ns: 0,
                 success: false,
                 error: Some(format!("Benchmark '{}' not found", request.benchmark_id)),
             }),
@@ -124,7 +124,7 @@ fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/benchmarks", get(list_benchmarks))
-        .route("/run_iteration", post(run_iteration))
+        .route("/run", post(run_iteration))
         .route("/shutdown", post(shutdown))
         .with_state(state)
 }
@@ -242,7 +242,7 @@ mod tests {
             .await
             .unwrap();
         let health: HealthResponse = serde_json::from_slice(&body).unwrap();
-        assert_eq!(health.status, "ready");
+        assert_eq!(health.status, "healthy");
     }
 
     #[tokio::test]
@@ -278,7 +278,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/run_iteration")
+                    .uri("/run")
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"benchmark_id": "test_bench"}"#))
                     .unwrap(),
@@ -293,8 +293,7 @@ mod tests {
             .unwrap();
         let result: RunIterationResponse = serde_json::from_slice(&body).unwrap();
         assert!(result.success);
-        assert!(result.duration_ns.is_some());
-        assert_eq!(result.duration_ns.unwrap(), 42_000_000); // 42ms in nanoseconds
+        assert_eq!(result.duration_ns, 42_000_000); // 42ms in nanoseconds
         assert!(result.error.is_none());
     }
 
@@ -307,7 +306,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/run_iteration")
+                    .uri("/run")
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"benchmark_id": "nonexistent"}"#))
                     .unwrap(),
@@ -322,7 +321,7 @@ mod tests {
             .unwrap();
         let result: RunIterationResponse = serde_json::from_slice(&body).unwrap();
         assert!(!result.success);
-        assert!(result.duration_ns.is_none());
+        assert_eq!(result.duration_ns, 0);
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("nonexistent"));
     }
