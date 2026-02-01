@@ -1,0 +1,38 @@
+[workspace]
+members = ["criterion-hypothesis", "criterion-hypothesis-harness"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/example/criterion-hypothesis"
+
+[workspace.dependencies]
+# Shared dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+
+# HTTP
+axum = "0.8"
+reqwest = { version = "0.12", features = ["json"] }
+
+# CLI
+clap = { version = "4.0", features = ["derive"] }
+toml = "0.8"
+
+# Statistics
+statrs = "0.18"
+
+# Terminal output
+colored = "3.0"
+
+# Criterion integration
+criterion = "0.5"
+
+# Testing
+tempfile = "3.15"
+tower = { version = "0.5", features = ["util"] }
