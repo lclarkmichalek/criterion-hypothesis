@@ -2,6 +2,7 @@
 
 use crate::config::Config;
 use clap::Parser;
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "criterion-hypothesis")]
@@ -31,6 +32,10 @@ pub struct Cli {
     /// Path to config file
     #[arg(long, default_value = ".criterion-hypothesis.toml")]
     pub config: String,
+
+    /// Path to project within repo (for monorepos/subdirectories)
+    #[arg(long)]
+    pub project_path: Option<PathBuf>,
 
     /// Verbose output
     #[arg(short, long)]
@@ -70,6 +75,7 @@ mod tests {
             sample_size: Some(200),
             warmup_iterations: Some(20),
             config: "custom.toml".to_string(),
+            project_path: None,
             verbose: true,
         };
 
@@ -90,6 +96,7 @@ mod tests {
             sample_size: None,
             warmup_iterations: None,
             config: ".criterion-hypothesis.toml".to_string(),
+            project_path: None,
             verbose: false,
         };
 
@@ -115,6 +122,7 @@ mod tests {
             sample_size: None,
             warmup_iterations: Some(5),
             config: ".criterion-hypothesis.toml".to_string(),
+            project_path: None,
             verbose: false,
         };
 

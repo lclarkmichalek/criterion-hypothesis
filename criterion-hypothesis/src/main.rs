@@ -37,11 +37,26 @@ async fn main() -> Result<()> {
         config.build.cargo_flags.clone(),
     );
 
+    // If project_path is specified, build from the subdirectory within each worktree
+    let baseline_build_path = match &cli.project_path {
+        Some(p) => baseline_path.join(p),
+        None => baseline_path.clone(),
+    };
+    let candidate_build_path = match &cli.project_path {
+        Some(p) => candidate_path.join(p),
+        None => candidate_path.clone(),
+    };
+
+    if cli.verbose {
+        eprintln!("Baseline build path: {:?}", baseline_build_path);
+        eprintln!("Candidate build path: {:?}", candidate_build_path);
+    }
+
     let baseline_build = builder
-        .build(&baseline_path)
+        .build(&baseline_build_path)
         .context("Failed to build baseline")?;
     let candidate_build = builder
-        .build(&candidate_path)
+        .build(&candidate_build_path)
         .context("Failed to build candidate")?;
 
     // 3. Run orchestrator
