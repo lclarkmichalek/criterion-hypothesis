@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Top-level configuration for criterion-hypothesis.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Settings for statistical hypothesis testing.
@@ -61,17 +61,6 @@ pub struct NetworkConfig {
     pub base_port: u16,
     /// Timeout in milliseconds for harness communication.
     pub harness_timeout_ms: u64,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            hypothesis: HypothesisConfig::default(),
-            orchestration: OrchestrationConfig::default(),
-            build: BuildConfig::default(),
-            network: NetworkConfig::default(),
-        }
-    }
 }
 
 impl Default for HypothesisConfig {
@@ -251,10 +240,7 @@ harness_timeout_ms = 60000
         assert_eq!(config.orchestration.warmup_iterations, 5);
         assert_eq!(config.orchestration.sample_size, 200);
         assert_eq!(config.build.profile, "bench");
-        assert_eq!(
-            config.build.cargo_flags,
-            vec!["--features", "test-feature"]
-        );
+        assert_eq!(config.build.cargo_flags, vec!["--features", "test-feature"]);
         assert_eq!(config.network.base_port, 8000);
         assert_eq!(config.network.harness_timeout_ms, 60000);
     }

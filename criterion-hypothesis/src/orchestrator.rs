@@ -84,7 +84,9 @@ impl HarnessHandle {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .map_err(|e| OrchestratorError::SpawnError(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| {
+                OrchestratorError::SpawnError(format!("Failed to create HTTP client: {}", e))
+            })?;
 
         Ok(Self {
             process,
@@ -141,14 +143,22 @@ impl HarnessHandle {
         let url = format!("{}/run", self.base_url());
         let request = RunIterationRequest::new(benchmark_id);
 
-        let response: RunIterationResponse =
-            self.client.post(&url).json(&request).send().await?.json().await?;
+        let response: RunIterationResponse = self
+            .client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await?
+            .json()
+            .await?;
 
         if response.success {
             Ok(response.duration())
         } else {
             Err(OrchestratorError::HarnessError(
-                response.error.unwrap_or_else(|| "Unknown error".to_string()),
+                response
+                    .error
+                    .unwrap_or_else(|| "Unknown error".to_string()),
             ))
         }
     }
@@ -290,9 +300,7 @@ impl Orchestrator {
             HarnessHandle::spawn(&self.candidate_binary, self.base_port + 1).await?;
 
         // Use a guard to ensure harnesses are killed on error
-        let result = self
-            .run_with_harnesses(&baseline, &candidate)
-            .await;
+        let result = self.run_with_harnesses(&baseline, &candidate).await;
 
         // 5. Shutdown harnesses (attempt graceful shutdown, then kill)
         let _ = baseline.shutdown().await;

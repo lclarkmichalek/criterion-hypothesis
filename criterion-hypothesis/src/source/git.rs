@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::{SourceError, SourceProvider};
@@ -82,7 +82,7 @@ impl GitWorktreeProvider {
     }
 
     /// Create a worktree at the specified path for the given ref.
-    fn create_worktree(&self, path: &PathBuf, git_ref: &str) -> Result<(), SourceError> {
+    fn create_worktree(&self, path: &Path, git_ref: &str) -> Result<(), SourceError> {
         // Ensure the parent directory exists
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
@@ -103,7 +103,7 @@ impl GitWorktreeProvider {
     }
 
     /// Remove a worktree at the specified path.
-    fn remove_worktree(&self, path: &PathBuf) -> Result<(), SourceError> {
+    fn remove_worktree(&self, path: &Path) -> Result<(), SourceError> {
         if !path.exists() {
             return Ok(());
         }
@@ -141,16 +141,16 @@ impl SourceProvider for GitWorktreeProvider {
         let candidate_path = self.candidate_path();
 
         // Create the baseline worktree
-        self.create_worktree(&baseline_path, baseline).map_err(|e| {
-            SourceError::Checkout(baseline.to_string(), format!("{}", e))
-        })?;
+        self.create_worktree(&baseline_path, baseline)
+            .map_err(|e| SourceError::Checkout(baseline.to_string(), format!("{}", e)))?;
 
         // Create the candidate worktree
-        self.create_worktree(&candidate_path, candidate).map_err(|e| {
-            // Try to clean up the baseline worktree if candidate creation fails
-            let _ = self.remove_worktree(&baseline_path);
-            SourceError::Checkout(candidate.to_string(), format!("{}", e))
-        })?;
+        self.create_worktree(&candidate_path, candidate)
+            .map_err(|e| {
+                // Try to clean up the baseline worktree if candidate creation fails
+                let _ = self.remove_worktree(&baseline_path);
+                SourceError::Checkout(candidate.to_string(), format!("{}", e))
+            })?;
 
         Ok((baseline_path, candidate_path))
     }

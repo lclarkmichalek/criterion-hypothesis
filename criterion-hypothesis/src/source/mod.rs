@@ -14,8 +14,11 @@ pub enum SourceError {
 }
 
 pub trait SourceProvider: Send + Sync {
-    fn prepare_sources(&self, baseline: &str, candidate: &str)
-        -> Result<(PathBuf, PathBuf), SourceError>;
+    fn prepare_sources(
+        &self,
+        baseline: &str,
+        candidate: &str,
+    ) -> Result<(PathBuf, PathBuf), SourceError>;
     fn cleanup(&self) -> Result<(), SourceError>;
 }
 

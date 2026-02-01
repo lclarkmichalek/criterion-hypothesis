@@ -101,10 +101,7 @@ async fn run_iteration(
             Json(RunIterationResponse {
                 duration_ns: None,
                 success: false,
-                error: Some(format!(
-                    "Benchmark '{}' not found",
-                    request.benchmark_id
-                )),
+                error: Some(format!("Benchmark '{}' not found", request.benchmark_id)),
             }),
         ),
     }
@@ -165,9 +162,7 @@ pub fn run_harness(registry: BenchmarkRegistry, port: u16) -> anyhow::Result<()>
     // Create a tokio runtime for the async server
     let runtime = tokio::runtime::Runtime::new()?;
 
-    runtime.block_on(async {
-        run_harness_async(registry, port).await
-    })
+    runtime.block_on(async { run_harness_async(registry, port).await })
 }
 
 /// Async implementation of the harness server.

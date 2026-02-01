@@ -277,7 +277,10 @@ mod tests {
 
     #[test]
     fn test_build_manager_new() {
-        let manager = BuildManager::new("release".to_string(), vec!["--features".to_string(), "test".to_string()]);
+        let manager = BuildManager::new(
+            "release".to_string(),
+            vec!["--features".to_string(), "test".to_string()],
+        );
         assert_eq!(manager.profile, "release");
         assert_eq!(manager.cargo_flags, vec!["--features", "test"]);
     }

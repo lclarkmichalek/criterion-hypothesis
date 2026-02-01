@@ -150,7 +150,11 @@ impl TerminalReporter {
     }
 
     /// Print a single benchmark row.
-    fn print_row(&self, writer: &mut impl Write, comparison: &BenchmarkComparison) -> io::Result<()> {
+    fn print_row(
+        &self,
+        writer: &mut impl Write,
+        comparison: &BenchmarkComparison,
+    ) -> io::Result<()> {
         let name = if comparison.name.len() > 38 {
             format!("{}...", &comparison.name[..35])
         } else {
@@ -169,7 +173,7 @@ impl TerminalReporter {
             match comparison.test_result.winner {
                 Some(Side::Candidate) => 6, // "faster"
                 Some(Side::Baseline) => 6,  // "slower"
-                None => 12,                  // "inconclusive"
+                None => 12,                 // "inconclusive"
             }
         } else {
             12 // "inconclusive"
@@ -197,7 +201,11 @@ impl TerminalReporter {
     }
 
     /// Print the summary footer.
-    fn print_summary(&self, writer: &mut impl Write, results: &[BenchmarkComparison]) -> io::Result<()> {
+    fn print_summary(
+        &self,
+        writer: &mut impl Write,
+        results: &[BenchmarkComparison],
+    ) -> io::Result<()> {
         let mut faster = 0;
         let mut slower = 0;
         let mut inconclusive = 0;
@@ -237,7 +245,11 @@ impl TerminalReporter {
                 inconclusive_text.yellow()
             )?;
         } else {
-            writeln!(writer, "{}, {}, {}", faster_text, slower_text, inconclusive_text)?;
+            writeln!(
+                writer,
+                "{}, {}, {}",
+                faster_text, slower_text, inconclusive_text
+            )?;
         }
 
         writeln!(writer)?;
@@ -347,8 +359,22 @@ mod tests {
     fn test_report_to_buffer() {
         let reporter = TerminalReporter::without_colors();
         let results = vec![
-            make_comparison("bench_fast", 1000.0, 800.0, 20.0, 0.001, Some(Side::Candidate)),
-            make_comparison("bench_slow", 1000.0, 1200.0, -20.0, 0.001, Some(Side::Baseline)),
+            make_comparison(
+                "bench_fast",
+                1000.0,
+                800.0,
+                20.0,
+                0.001,
+                Some(Side::Candidate),
+            ),
+            make_comparison(
+                "bench_slow",
+                1000.0,
+                1200.0,
+                -20.0,
+                0.001,
+                Some(Side::Baseline),
+            ),
             make_comparison("bench_same", 1000.0, 1010.0, -1.0, 0.5, None),
         ];
 

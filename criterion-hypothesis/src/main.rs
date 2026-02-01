@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use criterion_hypothesis::{
-    Cli, Config, GitWorktreeProvider, SourceProvider,
-    BuildManager, Orchestrator, WelchTTest, StatisticalTest,
-    TerminalReporter, Reporter, BenchmarkComparison, SampleStats,
+    BenchmarkComparison, BuildManager, Cli, Config, GitWorktreeProvider, Orchestrator, Reporter,
+    SampleStats, SourceProvider, StatisticalTest, TerminalReporter, WelchTTest,
 };
 use std::time::Duration;
 
@@ -38,9 +37,11 @@ async fn main() -> Result<()> {
         config.build.cargo_flags.clone(),
     );
 
-    let baseline_build = builder.build(&baseline_path)
+    let baseline_build = builder
+        .build(&baseline_path)
         .context("Failed to build baseline")?;
-    let candidate_build = builder.build(&candidate_path)
+    let candidate_build = builder
+        .build(&candidate_path)
         .context("Failed to build candidate")?;
 
     // 3. Run orchestrator
@@ -55,7 +56,9 @@ async fn main() -> Result<()> {
         Duration::from_millis(config.orchestration.interleave_interval_ms),
     );
 
-    let samples = orchestrator.run().await
+    let samples = orchestrator
+        .run()
+        .await
         .context("Failed to run benchmarks")?;
 
     // 4. Analyze results
@@ -83,7 +86,8 @@ async fn main() -> Result<()> {
 
     // 6. Cleanup
     eprintln!("Cleaning up...");
-    source_provider.cleanup()
+    source_provider
+        .cleanup()
         .context("Failed to cleanup sources")?;
 
     Ok(())
@@ -97,8 +101,16 @@ fn calculate_stats(samples: &[Duration]) -> SampleStats {
     let variance = ns_values.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
     let std_dev = variance.sqrt();
 
-    let min = samples.iter().map(|d| d.as_nanos() as u64).min().unwrap_or(0);
-    let max = samples.iter().map(|d| d.as_nanos() as u64).max().unwrap_or(0);
+    let min = samples
+        .iter()
+        .map(|d| d.as_nanos() as u64)
+        .min()
+        .unwrap_or(0);
+    let max = samples
+        .iter()
+        .map(|d| d.as_nanos() as u64)
+        .max()
+        .unwrap_or(0);
 
     SampleStats {
         mean_ns: mean,
