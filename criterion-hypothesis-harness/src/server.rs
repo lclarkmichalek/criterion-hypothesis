@@ -24,6 +24,11 @@ use tokio::sync::{watch, Mutex};
 
 use crate::BenchmarkRegistry;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// How often to log iteration stats (every N iterations).
+const LOG_INTERVAL: u64 = 100;
+
 /// Shared state for the HTTP server.
 struct AppState {
     /// The benchmark registry containing all registered benchmarks.
@@ -32,6 +37,8 @@ struct AppState {
     shutdown_tx: watch::Sender<bool>,
     /// Current claim nonce (None if unclaimed).
     claim: Mutex<Option<String>>,
+    /// Total iterations run since startup.
+    iteration_count: AtomicU64,
 }
 
 /// Health check endpoint.
@@ -77,11 +84,10 @@ async fn run_iteration(
 
     match state.registry.run(&request.benchmark_id) {
         Some(duration) => {
-            eprintln!(
-                "[harness] Ran '{}': {:.3}ms",
-                request.benchmark_id,
-                duration.as_secs_f64() * 1000.0
-            );
+            let count = state.iteration_count.fetch_add(1, Ordering::Relaxed) + 1;
+            if count % LOG_INTERVAL == 0 {
+                eprintln!("[harness] {} iterations completed", count);
+            }
             (StatusCode::OK, Json(RunIterationResponse::success(duration))).into_response()
         }
         None => {
@@ -274,6 +280,7 @@ pub async fn run_harness_async(registry: BenchmarkRegistry, port: u16) -> anyhow
         registry: Arc::new(registry),
         shutdown_tx,
         claim: Mutex::new(None),
+        iteration_count: AtomicU64::new(0),
     });
 
     // Build the router
@@ -319,6 +326,7 @@ mod tests {
             registry: Arc::new(registry),
             shutdown_tx,
             claim: Mutex::new(None),
+            iteration_count: AtomicU64::new(0),
         })
     }
 

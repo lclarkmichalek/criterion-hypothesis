@@ -8,7 +8,7 @@ criterion-hypothesis compares benchmark performance between two commits (baselin
 
 ### Key Features
 
-- **Interleaved execution** - Reduces environmental noise by alternating between baseline and candidate runs
+- **Interleaved execution** - Reduces environmental noise by running baseline and candidate sequentially in alternating order (not in parallel)
 - **Statistical rigor** - Uses Welch's t-test to determine if performance differences are significant
 - **Minimal migration** - Works with existing criterion benchmarks without code changes
 - **Git integration** - Automatically manages worktrees for baseline and candidate commits
@@ -149,6 +149,19 @@ CLI flags override config file values.
 3. **Orchestration** - Spawns harness processes and collects interleaved samples
 4. **Analysis** - Runs Welch's t-test on collected samples
 5. **Reporting** - Displays results with statistical significance
+
+### Harness Protocol
+
+The orchestrator communicates with harnesses via HTTP:
+
+- `GET /health` - Health check
+- `GET /benchmarks` - List available benchmarks
+- `POST /run` - Run a single benchmark iteration
+- `POST /claim` - Claim exclusive access (prevents concurrent orchestrators)
+- `POST /release` - Release the claim
+- `POST /shutdown` - Graceful shutdown
+
+When an orchestrator claims a harness, all subsequent requests must include the claim nonce in the `X-Harness-Claim` header. This prevents accidentally running two orchestrators against the same harness.
 
 ### Architecture
 
