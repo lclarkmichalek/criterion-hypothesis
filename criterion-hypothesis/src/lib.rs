@@ -7,16 +7,20 @@ pub mod build;
 pub mod cli;
 pub mod config;
 pub mod orchestrator;
-pub mod protocol;
-pub mod report;
 pub mod source;
-pub mod stats;
 
-// Re-export main types
+// Re-export core types for convenience
+pub use criterion_hypothesis_core::protocol;
+pub use criterion_hypothesis_core::report::{
+    BenchmarkComparison, ReportError, Reporter, SampleStats, TerminalReporter,
+};
+pub use criterion_hypothesis_core::stats::{Side, StatisticalTest, TestResult, WelchTTest};
+
+// Re-export main types from this crate
 pub use build::BuildManager;
 pub use cli::Cli;
 pub use config::Config;
-pub use orchestrator::{BenchmarkSamples, Orchestrator};
-pub use report::{BenchmarkComparison, Reporter, SampleStats, TerminalReporter};
+pub use orchestrator::{
+    run_with_urls, BenchmarkSamples, HarnessHandle, Orchestrator, OrchestratorError,
+};
 pub use source::{GitWorktreeProvider, SourceProvider};
-pub use stats::{Side, StatisticalTest, TestResult, WelchTTest};

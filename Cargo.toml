@@ -1,5 +1,5 @@
 [workspace]
-members = ["criterion-hypothesis", "criterion-hypothesis-harness"]
+members = ["criterion-hypothesis", "criterion-hypothesis-harness", "criterion-hypothesis-core"]
 resolver = "2"
 
 [workspace.package]

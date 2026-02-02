@@ -9,6 +9,7 @@ description = "Custom harness runtime for criterion-hypothesis"
 path = "src/lib.rs"
 
 [dependencies]
+criterion-hypothesis-core = { path = "../criterion-hypothesis-core" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -9,13 +9,25 @@ use std::path::PathBuf;
 #[command(about = "Statistically rigorous A/B testing of benchmarks across commits")]
 #[command(version)]
 pub struct Cli {
-    /// Baseline commit/branch to compare against
-    #[arg(short, long)]
-    pub baseline: String,
+    /// Baseline commit/branch to compare against (or use --baseline-url for manual mode)
+    #[arg(short, long, required_unless_present = "baseline_url")]
+    pub baseline: Option<String>,
 
-    /// Candidate commit/branch to test
-    #[arg(short, long)]
-    pub candidate: String,
+    /// Candidate commit/branch to test (or use --candidate-url for manual mode)
+    #[arg(short, long, required_unless_present = "candidate_url")]
+    pub candidate: Option<String>,
+
+    /// URL of already-running baseline harness (skips git/build)
+    #[arg(long, conflicts_with = "baseline", requires = "candidate_url")]
+    pub baseline_url: Option<String>,
+
+    /// URL of already-running candidate harness (skips git/build)
+    #[arg(long, conflicts_with = "candidate", requires = "baseline_url")]
+    pub candidate_url: Option<String>,
+
+    /// Print harness stdout/stderr for debugging
+    #[arg(long)]
+    pub harness_output: bool,
 
     /// Confidence level for statistical tests (0.0-1.0)
     #[arg(long)]
@@ -43,6 +55,11 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Check if we're in manual URL mode (connecting to pre-running harnesses)
+    pub fn is_manual_mode(&self) -> bool {
+        self.baseline_url.is_some() && self.candidate_url.is_some()
+    }
+
     /// Apply CLI overrides to the configuration.
     ///
     /// CLI arguments take precedence over config file values.
@@ -69,8 +86,11 @@ mod tests {
     #[test]
     fn test_apply_to_config_with_overrides() {
         let cli = Cli {
-            baseline: "main".to_string(),
-            candidate: "feature".to_string(),
+            baseline: Some("main".to_string()),
+            candidate: Some("feature".to_string()),
+            baseline_url: None,
+            candidate_url: None,
+            harness_output: false,
             confidence_level: Some(0.99),
             sample_size: Some(200),
             warmup_iterations: Some(20),
@@ -90,8 +110,11 @@ mod tests {
     #[test]
     fn test_apply_to_config_without_overrides() {
         let cli = Cli {
-            baseline: "main".to_string(),
-            candidate: "feature".to_string(),
+            baseline: Some("main".to_string()),
+            candidate: Some("feature".to_string()),
+            baseline_url: None,
+            candidate_url: None,
+            harness_output: false,
             confidence_level: None,
             sample_size: None,
             warmup_iterations: None,
@@ -116,8 +139,11 @@ mod tests {
     #[test]
     fn test_apply_to_config_partial_overrides() {
         let cli = Cli {
-            baseline: "main".to_string(),
-            candidate: "feature".to_string(),
+            baseline: Some("main".to_string()),
+            candidate: Some("feature".to_string()),
+            baseline_url: None,
+            candidate_url: None,
+            harness_output: false,
             confidence_level: Some(0.90),
             sample_size: None,
             warmup_iterations: Some(5),
@@ -150,11 +176,12 @@ mod tests {
             "--verbose",
         ]);
 
-        assert_eq!(cli.baseline, "main");
-        assert_eq!(cli.candidate, "feature-branch");
+        assert_eq!(cli.baseline, Some("main".to_string()));
+        assert_eq!(cli.candidate, Some("feature-branch".to_string()));
         assert_eq!(cli.confidence_level, Some(0.99));
         assert_eq!(cli.sample_size, Some(50));
         assert!(cli.verbose);
+        assert!(!cli.is_manual_mode());
     }
 
     #[test]
@@ -167,12 +194,51 @@ mod tests {
             "HEAD",
         ]);
 
-        assert_eq!(cli.baseline, "v1.0.0");
-        assert_eq!(cli.candidate, "HEAD");
+        assert_eq!(cli.baseline, Some("v1.0.0".to_string()));
+        assert_eq!(cli.candidate, Some("HEAD".to_string()));
         assert_eq!(cli.confidence_level, None);
         assert_eq!(cli.sample_size, None);
         assert_eq!(cli.warmup_iterations, None);
         assert_eq!(cli.config, ".criterion-hypothesis.toml");
         assert!(!cli.verbose);
+        assert!(!cli.is_manual_mode());
+    }
+
+    #[test]
+    fn test_cli_parse_manual_mode() {
+        let cli = Cli::parse_from([
+            "criterion-hypothesis",
+            "--baseline-url",
+            "http://localhost:9100",
+            "--candidate-url",
+            "http://localhost:9101",
+        ]);
+
+        assert!(cli.baseline.is_none());
+        assert!(cli.candidate.is_none());
+        assert_eq!(
+            cli.baseline_url,
+            Some("http://localhost:9100".to_string())
+        );
+        assert_eq!(
+            cli.candidate_url,
+            Some("http://localhost:9101".to_string())
+        );
+        assert!(cli.is_manual_mode());
+    }
+
+    #[test]
+    fn test_cli_manual_mode_with_harness_output() {
+        let cli = Cli::parse_from([
+            "criterion-hypothesis",
+            "--baseline-url",
+            "http://localhost:9100",
+            "--candidate-url",
+            "http://localhost:9101",
+            "--harness-output",
+        ]);
+
+        assert!(cli.is_manual_mode());
+        assert!(cli.harness_output);
     }
 }

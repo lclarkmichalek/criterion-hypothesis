@@ -13,6 +13,7 @@ path = "src/main.rs"
 path = "src/lib.rs"
 
 [dependencies]
+criterion-hypothesis-core = { path = "../criterion-hypothesis-core" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -21,8 +22,6 @@ tokio.workspace = true
 reqwest.workspace = true
 clap.workspace = true
 toml.workspace = true
-statrs.workspace = true
-colored.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -10,7 +10,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
 
-use crate::protocol::{
+use criterion_hypothesis_core::protocol::{
     BenchmarkListResponse, HealthResponse, RunIterationRequest, RunIterationResponse,
     ShutdownResponse,
 };
@@ -23,8 +23,12 @@ pub enum OrchestratorError {
     SpawnError(String),
 
     /// Harness did not become ready within the timeout period.
-    #[error("Harness not ready after timeout")]
-    TimeoutError,
+    #[error("Harness at {url} not ready after {timeout_secs}s timeout. Last error: {last_error}")]
+    TimeoutError {
+        url: String,
+        timeout_secs: u64,
+        last_error: String,
+    },
 
     /// HTTP request to harness failed.
     #[error("HTTP request failed: {0}")]
@@ -44,16 +48,22 @@ pub enum OrchestratorError {
     /// Harness reported an error during execution.
     #[error("Harness error: {0}")]
     HarnessError(String),
+
+    /// Invalid URL provided.
+    #[error("Invalid URL: {0}")]
+    InvalidUrl(String),
 }
 
-/// Handle to a running harness process.
+/// Handle to a running harness process (spawned by us).
 pub struct HarnessHandle {
-    /// The child process.
-    process: Child,
-    /// Port the harness is listening on.
-    port: u16,
+    /// The child process (None for remote harnesses).
+    process: Option<Child>,
+    /// Base URL for the harness.
+    base_url: String,
     /// HTTP client for communication.
     client: reqwest::Client,
+    /// Whether this is a managed process (spawned by us) or remote.
+    is_managed: bool,
 }
 
 impl HarnessHandle {
@@ -89,15 +99,52 @@ impl HarnessHandle {
             })?;
 
         Ok(Self {
-            process,
-            port,
+            process: Some(process),
+            base_url: format!("http://127.0.0.1:{}", port),
             client,
+            is_managed: true,
+        })
+    }
+
+    /// Connect to an already-running harness at the given URL.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - The base URL of the running harness (e.g., "http://localhost:9100")
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the URL is invalid or the client cannot be created.
+    pub fn connect(url: &str) -> Result<Self, OrchestratorError> {
+        // Validate URL format
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(OrchestratorError::InvalidUrl(format!(
+                "URL must start with http:// or https://: {}",
+                url
+            )));
+        }
+
+        // Remove trailing slash if present
+        let base_url = url.trim_end_matches('/').to_string();
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| {
+                OrchestratorError::SpawnError(format!("Failed to create HTTP client: {}", e))
+            })?;
+
+        Ok(Self {
+            process: None,
+            base_url,
+            client,
+            is_managed: false,
         })
     }
 
     /// Get the base URL for this harness.
-    fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
+    fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     /// Check if the harness is healthy.
@@ -105,12 +152,12 @@ impl HarnessHandle {
     /// # Errors
     ///
     /// Returns an error if the health check fails.
-    pub async fn health_check(&self) -> Result<(), OrchestratorError> {
+    pub async fn health_check(&self) -> Result<HealthResponse, OrchestratorError> {
         let url = format!("{}/health", self.base_url());
         let response: HealthResponse = self.client.get(&url).send().await?.json().await?;
 
         if response.status == "healthy" {
-            Ok(())
+            Ok(response)
         } else {
             Err(OrchestratorError::HarnessError(format!(
                 "Unhealthy status: {}",
@@ -174,21 +221,30 @@ impl HarnessHandle {
         Ok(())
     }
 
-    /// Kill the harness process forcefully.
+    /// Kill the harness process forcefully (only for managed processes).
     pub fn kill(&mut self) {
-        let _ = self.process.kill();
+        if let Some(ref mut process) = self.process {
+            let _ = process.kill();
+        }
     }
 
-    /// Get the process ID of the harness.
-    pub fn pid(&self) -> u32 {
-        self.process.id()
+    /// Get the process ID of the harness (only for managed processes).
+    pub fn pid(&self) -> Option<u32> {
+        self.process.as_ref().map(|p| p.id())
+    }
+
+    /// Check if this is a managed (spawned) harness.
+    pub fn is_managed(&self) -> bool {
+        self.is_managed
     }
 }
 
 impl Drop for HarnessHandle {
     fn drop(&mut self) {
-        // Ensure the process is killed when the handle is dropped
-        self.kill();
+        // Only kill managed processes
+        if self.is_managed {
+            self.kill();
+        }
     }
 }
 
@@ -300,7 +356,9 @@ impl Orchestrator {
             HarnessHandle::spawn(&self.candidate_binary, self.base_port + 1).await?;
 
         // Use a guard to ensure harnesses are killed on error
-        let result = self.run_with_harnesses(&baseline, &candidate).await;
+        let result = self
+            .run_with_harnesses(&baseline, &candidate, self.timeout)
+            .await;
 
         // 5. Shutdown harnesses (attempt graceful shutdown, then kill)
         let _ = baseline.shutdown().await;
@@ -321,10 +379,11 @@ impl Orchestrator {
         &self,
         baseline: &HarnessHandle,
         candidate: &HarnessHandle,
+        timeout: Duration,
     ) -> Result<Vec<BenchmarkSamples>, OrchestratorError> {
         // 2. Wait for health checks
-        self.wait_for_health(baseline).await?;
-        self.wait_for_health(candidate).await?;
+        wait_for_health(baseline, timeout).await?;
+        wait_for_health(candidate, timeout).await?;
 
         // 3. Get benchmark lists and validate they match
         let baseline_benchmarks = baseline.list_benchmarks().await?;
@@ -348,22 +407,6 @@ impl Orchestrator {
         }
 
         Ok(results)
-    }
-
-    /// Wait for a harness to become healthy, with retries.
-    async fn wait_for_health(&self, harness: &HarnessHandle) -> Result<(), OrchestratorError> {
-        let start = std::time::Instant::now();
-        let retry_interval = Duration::from_millis(100);
-
-        loop {
-            match harness.health_check().await {
-                Ok(()) => return Ok(()),
-                Err(_) if start.elapsed() < self.timeout => {
-                    sleep(retry_interval).await;
-                }
-                Err(_) => return Err(OrchestratorError::TimeoutError),
-            }
-        }
     }
 
     /// Collect interleaved samples for a single benchmark.
@@ -402,6 +445,111 @@ impl Orchestrator {
 
         Ok(samples)
     }
+}
+
+/// Wait for a harness to become healthy, with retries.
+pub async fn wait_for_health(
+    harness: &HarnessHandle,
+    timeout: Duration,
+) -> Result<(), OrchestratorError> {
+    let start = std::time::Instant::now();
+    let retry_interval = Duration::from_millis(100);
+    let mut last_error: Option<OrchestratorError> = None;
+
+    loop {
+        match harness.health_check().await {
+            Ok(_) => return Ok(()),
+            Err(e) if start.elapsed() < timeout => {
+                last_error = Some(e);
+                sleep(retry_interval).await;
+            }
+            Err(e) => {
+                let error_msg = last_error
+                    .map(|le| le.to_string())
+                    .unwrap_or_else(|| e.to_string());
+                return Err(OrchestratorError::TimeoutError {
+                    url: harness.base_url().to_string(),
+                    timeout_secs: timeout.as_secs(),
+                    last_error: error_msg,
+                });
+            }
+        }
+    }
+}
+
+/// Run benchmark comparison using pre-running harnesses at the given URLs.
+///
+/// This function connects to already-running harnesses instead of spawning new ones.
+/// The harnesses are NOT shut down after the comparison completes.
+///
+/// # Arguments
+///
+/// * `baseline_url` - URL of the baseline harness (e.g., "http://localhost:9100")
+/// * `candidate_url` - URL of the candidate harness (e.g., "http://localhost:9101")
+/// * `timeout` - Timeout for waiting for harnesses to become healthy
+/// * `warmup_iterations` - Number of warmup iterations to discard
+/// * `sample_size` - Number of samples to collect
+/// * `interleave_interval` - Interval between interleaved benchmark runs
+pub async fn run_with_urls(
+    baseline_url: &str,
+    candidate_url: &str,
+    timeout: Duration,
+    warmup_iterations: u32,
+    sample_size: u32,
+    interleave_interval: Duration,
+) -> Result<Vec<BenchmarkSamples>, OrchestratorError> {
+    // Connect to remote harnesses
+    let baseline = HarnessHandle::connect(baseline_url)?;
+    let candidate = HarnessHandle::connect(candidate_url)?;
+
+    // Wait for health checks
+    wait_for_health(&baseline, timeout).await?;
+    wait_for_health(&candidate, timeout).await?;
+
+    // Get benchmark lists and validate they match
+    let baseline_benchmarks = baseline.list_benchmarks().await?;
+    let candidate_benchmarks = candidate.list_benchmarks().await?;
+
+    if baseline_benchmarks != candidate_benchmarks {
+        return Err(OrchestratorError::BenchmarkMismatch {
+            baseline: baseline_benchmarks,
+            candidate: candidate_benchmarks,
+        });
+    }
+
+    // Collect samples for each benchmark
+    let mut results = Vec::new();
+
+    for benchmark_name in &baseline_benchmarks {
+        let mut samples = BenchmarkSamples::new(benchmark_name);
+
+        // Run warmup iterations (discarded)
+        for _ in 0..warmup_iterations {
+            baseline.run_iteration(benchmark_name).await?;
+            sleep(interleave_interval).await;
+            candidate.run_iteration(benchmark_name).await?;
+            sleep(interleave_interval).await;
+        }
+
+        // Collect interleaved samples
+        for _ in 0..sample_size {
+            let baseline_duration = baseline.run_iteration(benchmark_name).await?;
+            samples.add_baseline(baseline_duration);
+
+            sleep(interleave_interval).await;
+
+            let candidate_duration = candidate.run_iteration(benchmark_name).await?;
+            samples.add_candidate(candidate_duration);
+
+            sleep(interleave_interval).await;
+        }
+
+        results.push(samples);
+    }
+
+    // Note: We do NOT shutdown remote harnesses - they're managed externally
+
+    Ok(results)
 }
 
 #[cfg(test)]
@@ -449,12 +597,26 @@ mod tests {
     }
 
     #[test]
-    fn test_harness_handle_base_url() {
-        // We can't easily test HarnessHandle without spawning a real process,
-        // but we can verify the URL format logic
-        let port: u16 = 9100;
-        let expected_url = format!("http://127.0.0.1:{}", port);
-        assert_eq!(expected_url, "http://127.0.0.1:9100");
+    fn test_harness_handle_connect_valid() {
+        let handle = HarnessHandle::connect("http://localhost:9100").unwrap();
+        assert!(!handle.is_managed());
+        assert_eq!(handle.base_url(), "http://localhost:9100");
+    }
+
+    #[test]
+    fn test_harness_handle_connect_trailing_slash() {
+        let handle = HarnessHandle::connect("http://localhost:9100/").unwrap();
+        assert_eq!(handle.base_url(), "http://localhost:9100");
+    }
+
+    #[test]
+    fn test_harness_handle_connect_invalid_url() {
+        let result = HarnessHandle::connect("not-a-url");
+        assert!(result.is_err());
+        match result {
+            Err(OrchestratorError::InvalidUrl(_)) => {}
+            _ => panic!("Expected InvalidUrl error"),
+        }
     }
 
     #[test]
@@ -462,8 +624,14 @@ mod tests {
         let err = OrchestratorError::SpawnError("test error".to_string());
         assert_eq!(err.to_string(), "Failed to spawn harness: test error");
 
-        let err = OrchestratorError::TimeoutError;
-        assert_eq!(err.to_string(), "Harness not ready after timeout");
+        let err = OrchestratorError::TimeoutError {
+            url: "http://localhost:9100".to_string(),
+            timeout_secs: 30,
+            last_error: "connection refused".to_string(),
+        };
+        assert!(err.to_string().contains("not ready after"));
+        assert!(err.to_string().contains("30s timeout"));
+        assert!(err.to_string().contains("connection refused"));
 
         let err = OrchestratorError::BenchmarkMismatch {
             baseline: vec!["a".to_string(), "b".to_string()],
@@ -476,5 +644,8 @@ mod tests {
 
         let err = OrchestratorError::HarnessError("crash".to_string());
         assert_eq!(err.to_string(), "Harness error: crash");
+
+        let err = OrchestratorError::InvalidUrl("bad-url".to_string());
+        assert_eq!(err.to_string(), "Invalid URL: bad-url");
     }
 }

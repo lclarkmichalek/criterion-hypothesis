@@ -328,15 +328,26 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "colored",
+ "criterion-hypothesis-core",
  "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+]
+
+[[package]]
+name = "criterion-hypothesis-core"
+version = "0.1.0"
+dependencies = [
+ "colored",
  "serde",
  "serde_json",
  "statrs",
  "tempfile",
  "thiserror",
- "tokio",
- "toml",
 ]
 
 [[package]]
@@ -346,6 +357,7 @@ dependencies = [
  "anyhow",
  "axum",
  "criterion",
+ "criterion-hypothesis-core",
  "serde",
  "serde_json",
  "thiserror",

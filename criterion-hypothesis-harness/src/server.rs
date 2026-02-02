@@ -13,7 +13,10 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
+use criterion_hypothesis_core::protocol::{
+    BenchmarkListResponse, HealthResponse, RunIterationRequest, RunIterationResponse,
+    ShutdownResponse,
+};
 use tokio::sync::watch;
 
 use crate::BenchmarkRegistry;
@@ -26,61 +29,26 @@ struct AppState {
     shutdown_tx: watch::Sender<bool>,
 }
 
-/// Health check response.
-#[derive(Serialize, Deserialize)]
-struct HealthResponse {
-    status: String,
-}
-
-/// Response containing the list of available benchmarks.
-#[derive(Serialize, Deserialize)]
-struct BenchmarksResponse {
-    benchmarks: Vec<String>,
-}
-
-/// Request to run a single benchmark iteration.
-#[derive(Deserialize)]
-struct RunIterationRequest {
-    benchmark_id: String,
-}
-
-/// Response from running a benchmark iteration.
-#[derive(Serialize, Deserialize)]
-struct RunIterationResponse {
-    duration_ns: u64,
-    success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-}
-
-/// Response from shutdown request.
-#[derive(Serialize, Deserialize)]
-struct ShutdownResponse {
-    message: String,
-}
-
 /// Health check endpoint.
 ///
 /// GET /health
-/// Returns: { "status": "ready" }
+/// Returns: { "status": "healthy" }
 async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "healthy".to_string(),
-    })
+    Json(HealthResponse::healthy())
 }
 
 /// List all available benchmarks.
 ///
 /// GET /benchmarks
 /// Returns: { "benchmarks": ["bench1", "bench2", ...] }
-async fn list_benchmarks(State(state): State<Arc<AppState>>) -> Json<BenchmarksResponse> {
+async fn list_benchmarks(State(state): State<Arc<AppState>>) -> Json<BenchmarkListResponse> {
     let benchmarks = state.registry.list();
-    Json(BenchmarksResponse { benchmarks })
+    Json(BenchmarkListResponse::new(benchmarks))
 }
 
 /// Run a single iteration of a benchmark.
 ///
-/// POST /run_iteration
+/// POST /run
 /// Body: { "benchmark_id": "..." }
 /// Returns: { "duration_ns": ..., "success": true/false, "error": "..." }
 async fn run_iteration(
@@ -88,21 +56,13 @@ async fn run_iteration(
     Json(request): Json<RunIterationRequest>,
 ) -> impl IntoResponse {
     match state.registry.run(&request.benchmark_id) {
-        Some(duration) => (
-            StatusCode::OK,
-            Json(RunIterationResponse {
-                duration_ns: duration.as_nanos() as u64,
-                success: true,
-                error: None,
-            }),
-        ),
+        Some(duration) => (StatusCode::OK, Json(RunIterationResponse::success(duration))),
         None => (
             StatusCode::NOT_FOUND,
-            Json(RunIterationResponse {
-                duration_ns: 0,
-                success: false,
-                error: Some(format!("Benchmark '{}' not found", request.benchmark_id)),
-            }),
+            Json(RunIterationResponse::failure(format!(
+                "Benchmark '{}' not found",
+                request.benchmark_id
+            ))),
         ),
     }
 }
@@ -110,13 +70,11 @@ async fn run_iteration(
 /// Trigger graceful shutdown of the server.
 ///
 /// POST /shutdown
-/// Returns: { "message": "Shutting down" }
+/// Returns: { "status": "shutting_down" }
 async fn shutdown(State(state): State<Arc<AppState>>) -> Json<ShutdownResponse> {
     // Signal shutdown to the server
     let _ = state.shutdown_tx.send(true);
-    Json(ShutdownResponse {
-        message: "Shutting down".to_string(),
-    })
+    Json(ShutdownResponse::acknowledged())
 }
 
 /// Build the router with all endpoints.
@@ -265,7 +223,7 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let benchmarks: BenchmarksResponse = serde_json::from_slice(&body).unwrap();
+        let benchmarks: BenchmarkListResponse = serde_json::from_slice(&body).unwrap();
         assert!(benchmarks.benchmarks.contains(&"test_bench".to_string()));
     }
 
@@ -348,6 +306,6 @@ mod tests {
             .await
             .unwrap();
         let result: ShutdownResponse = serde_json::from_slice(&body).unwrap();
-        assert_eq!(result.message, "Shutting down");
+        assert_eq!(result.status, "shutting_down");
     }
 }

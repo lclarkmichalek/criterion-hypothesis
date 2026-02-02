@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use criterion_hypothesis::{
-    BenchmarkComparison, BuildManager, Cli, Config, GitWorktreeProvider, Orchestrator, Reporter,
-    SampleStats, SourceProvider, StatisticalTest, TerminalReporter, WelchTTest,
+    run_with_urls, BenchmarkComparison, BuildManager, Cli, Config, GitWorktreeProvider,
+    Orchestrator, Reporter, SampleStats, SourceProvider, StatisticalTest, TerminalReporter,
+    WelchTTest,
 };
 use std::time::Duration;
 
@@ -18,11 +19,90 @@ async fn main() -> Result<()> {
         eprintln!("Configuration: {:?}", config);
     }
 
+    // Run in the appropriate mode
+    let samples = if cli.is_manual_mode() {
+        run_manual_mode(&cli, &config).await?
+    } else {
+        run_automatic_mode(&cli, &config).await?
+    };
+
+    // Analyze results
+    eprintln!("Analyzing results...");
+    let test = WelchTTest::new(config.hypothesis.confidence_level);
+    let mut comparisons = Vec::new();
+
+    for sample in samples {
+        let test_result = test.analyze(&sample.baseline_samples, &sample.candidate_samples);
+
+        let baseline_stats = calculate_stats(&sample.baseline_samples);
+        let candidate_stats = calculate_stats(&sample.candidate_samples);
+
+        comparisons.push(BenchmarkComparison {
+            name: sample.name,
+            baseline_stats,
+            candidate_stats,
+            test_result,
+        });
+    }
+
+    // Report results
+    let reporter = TerminalReporter::new();
+    reporter.report(&comparisons)?;
+
+    Ok(())
+}
+
+/// Run in manual mode - connect to pre-running harnesses at the specified URLs.
+async fn run_manual_mode(
+    cli: &Cli,
+    config: &Config,
+) -> Result<Vec<criterion_hypothesis::BenchmarkSamples>> {
+    let baseline_url = cli
+        .baseline_url
+        .as_ref()
+        .expect("baseline_url required for manual mode");
+    let candidate_url = cli
+        .candidate_url
+        .as_ref()
+        .expect("candidate_url required for manual mode");
+
+    eprintln!("Running in manual mode...");
+    eprintln!("  Baseline URL: {}", baseline_url);
+    eprintln!("  Candidate URL: {}", candidate_url);
+
+    let samples = run_with_urls(
+        baseline_url,
+        candidate_url,
+        Duration::from_millis(config.network.harness_timeout_ms),
+        config.orchestration.warmup_iterations,
+        config.orchestration.sample_size,
+        Duration::from_millis(config.orchestration.interleave_interval_ms),
+    )
+    .await
+    .context("Failed to run benchmarks with URLs")?;
+
+    Ok(samples)
+}
+
+/// Run in automatic mode - checkout commits, build, spawn harnesses.
+async fn run_automatic_mode(
+    cli: &Cli,
+    config: &Config,
+) -> Result<Vec<criterion_hypothesis::BenchmarkSamples>> {
+    let baseline = cli
+        .baseline
+        .as_ref()
+        .expect("baseline required for automatic mode");
+    let candidate = cli
+        .candidate
+        .as_ref()
+        .expect("candidate required for automatic mode");
+
     // 1. Prepare sources
     eprintln!("Preparing sources...");
     let source_provider = GitWorktreeProvider::new()?;
     let (baseline_path, candidate_path) = source_provider
-        .prepare_sources(&cli.baseline, &cli.candidate)
+        .prepare_sources(baseline, candidate)
         .context("Failed to prepare sources")?;
 
     if cli.verbose {
@@ -76,36 +156,13 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to run benchmarks")?;
 
-    // 4. Analyze results
-    eprintln!("Analyzing results...");
-    let test = WelchTTest::new(config.hypothesis.confidence_level);
-    let mut comparisons = Vec::new();
-
-    for sample in samples {
-        let test_result = test.analyze(&sample.baseline_samples, &sample.candidate_samples);
-
-        let baseline_stats = calculate_stats(&sample.baseline_samples);
-        let candidate_stats = calculate_stats(&sample.candidate_samples);
-
-        comparisons.push(BenchmarkComparison {
-            name: sample.name,
-            baseline_stats,
-            candidate_stats,
-            test_result,
-        });
-    }
-
-    // 5. Report results
-    let reporter = TerminalReporter::new();
-    reporter.report(&comparisons)?;
-
-    // 6. Cleanup
+    // 4. Cleanup
     eprintln!("Cleaning up...");
     source_provider
         .cleanup()
         .context("Failed to cleanup sources")?;
 
-    Ok(())
+    Ok(samples)
 }
 
 fn calculate_stats(samples: &[Duration]) -> SampleStats {

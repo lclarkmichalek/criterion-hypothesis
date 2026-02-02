@@ -1,0 +1,19 @@
+[package]
+name = "criterion-hypothesis-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core types and utilities for criterion-hypothesis"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+statrs.workspace = true
+colored.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
