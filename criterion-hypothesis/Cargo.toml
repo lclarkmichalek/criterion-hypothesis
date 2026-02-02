@@ -22,6 +22,8 @@ tokio.workspace = true
 reqwest.workspace = true
 clap.workspace = true
 toml.workspace = true
+uuid = { version = "1.0", features = ["v4"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+criterion-hypothesis-harness = { path = "../criterion-hypothesis-harness" }

@@ -96,6 +96,83 @@ impl ShutdownResponse {
     }
 }
 
+/// Request to claim exclusive access to the harness.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimRequest {
+    /// Unique nonce identifying this orchestrator session.
+    pub nonce: String,
+}
+
+impl ClaimRequest {
+    /// Create a new claim request.
+    pub fn new(nonce: impl Into<String>) -> Self {
+        Self {
+            nonce: nonce.into(),
+        }
+    }
+}
+
+/// Response to a claim request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimResponse {
+    /// Whether the claim was successful.
+    pub success: bool,
+    /// Error message if claim failed (e.g., already claimed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl ClaimResponse {
+    /// Create a successful claim response.
+    pub fn success() -> Self {
+        Self {
+            success: true,
+            error: None,
+        }
+    }
+
+    /// Create a failed claim response (already claimed by another orchestrator).
+    pub fn already_claimed() -> Self {
+        Self {
+            success: false,
+            error: Some("Harness is already claimed by another orchestrator".to_string()),
+        }
+    }
+}
+
+/// Request to release a claim on the harness.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseRequest {
+    /// The nonce that was used to claim the harness.
+    pub nonce: String,
+}
+
+impl ReleaseRequest {
+    /// Create a new release request.
+    pub fn new(nonce: impl Into<String>) -> Self {
+        Self {
+            nonce: nonce.into(),
+        }
+    }
+}
+
+/// Response to a release request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseResponse {
+    /// Whether the release was successful.
+    pub success: bool,
+}
+
+impl ReleaseResponse {
+    /// Create a successful release response.
+    pub fn success() -> Self {
+        Self { success: true }
+    }
+}
+
+/// Header name for the claim nonce.
+pub const CLAIM_HEADER: &str = "X-Harness-Claim";
+
 #[cfg(test)]
 mod tests {
     use super::*;

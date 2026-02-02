@@ -21,25 +21,61 @@ cargo install criterion-hypothesis
 
 ## Usage
 
+### Automatic Mode (Git + Build)
+
 Run from a git repository containing criterion benchmarks:
 
 ```bash
+# Compare two branches
 criterion-hypothesis --baseline main --candidate feature-branch
+
+# Compare specific commits
+criterion-hypothesis --baseline v1.0.0 --candidate HEAD
+
+# For monorepos, specify the project subdirectory
+criterion-hypothesis --baseline main --candidate HEAD --project-path examples/char-counter
+
+# Enable harness output for debugging
+criterion-hypothesis --baseline main --candidate HEAD --harness-output
+```
+
+### Manual Mode (Pre-running Harnesses)
+
+For debugging or when you want more control, you can start harnesses manually and connect to them:
+
+```bash
+# Terminal 1: Build and start baseline harness
+cd examples/char-counter
+cargo build --release --bench char_bench
+CH_PORT=9100 ./target/release/deps/char_bench-*
+
+# Terminal 2: Start candidate harness (same binary for testing, or different version)
+CH_PORT=9101 ./target/release/deps/char_bench-*
+
+# Terminal 3: Run comparison against pre-running harnesses
+criterion-hypothesis \
+  --baseline-url http://localhost:9100 \
+  --candidate-url http://localhost:9101 \
+  --sample-size 30
 ```
 
 ### Options
 
 ```
 Options:
-  -b, --baseline <BASELINE>        Baseline commit/branch to compare against
-  -c, --candidate <CANDIDATE>      Candidate commit/branch to test
-      --confidence-level <LEVEL>   Confidence level for statistical tests (0.0-1.0)
-      --sample-size <SIZE>         Number of sample iterations per benchmark
-      --warmup-iterations <N>      Number of warmup iterations
-      --config <PATH>              Path to config file [default: .criterion-hypothesis.toml]
-  -v, --verbose                    Verbose output
-  -h, --help                       Print help
-  -V, --version                    Print version
+  -b, --baseline <BASELINE>              Baseline commit/branch to compare against
+  -c, --candidate <CANDIDATE>            Candidate commit/branch to test
+      --baseline-url <URL>               URL of already-running baseline harness (manual mode)
+      --candidate-url <URL>              URL of already-running candidate harness (manual mode)
+      --project-path <PATH>              Path to project within repo (for monorepos)
+      --harness-output                   Print harness stdout/stderr for debugging
+      --confidence-level <LEVEL>         Confidence level for statistical tests (0.0-1.0)
+      --sample-size <SIZE>               Number of sample iterations per benchmark
+      --warmup-iterations <N>            Number of warmup iterations
+      --config <PATH>                    Path to config file [default: .criterion-hypothesis.toml]
+  -v, --verbose                          Verbose output
+  -h, --help                             Print help
+  -V, --version                          Print version
 ```
 
 ### Example Output
@@ -54,6 +90,31 @@ serialize          89.2 µs ±1.5     91.1 µs ±1.8     +2.1%     0.142    -
 validate           45.6 µs ±0.8     44.9 µs ±0.9     -1.5%     0.089    -
 ─────────────────────────────────────────────────────────────────────────────
 Summary: 1 faster, 0 slower, 2 inconclusive
+```
+
+## Quick Start Example
+
+The repository includes a `char-counter` example you can use to test:
+
+```bash
+# Clone and enter the repository
+git clone https://github.com/anthropics/criterion-hypothesis
+cd criterion-hypothesis
+
+# Run a comparison between two commits (uses the char-counter example)
+cargo run -p criterion-hypothesis --release -- \
+  --baseline HEAD~1 \
+  --candidate HEAD \
+  --project-path examples/char-counter \
+  --sample-size 20
+
+# With harness debug output enabled
+cargo run -p criterion-hypothesis --release -- \
+  --baseline HEAD~1 \
+  --candidate HEAD \
+  --project-path examples/char-counter \
+  --sample-size 20 \
+  --harness-output
 ```
 
 ## Configuration

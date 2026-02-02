@@ -149,6 +149,7 @@ async fn run_automatic_mode(
         config.orchestration.warmup_iterations,
         config.orchestration.sample_size,
         Duration::from_millis(config.orchestration.interleave_interval_ms),
+        cli.harness_output,
     );
 
     let samples = orchestrator

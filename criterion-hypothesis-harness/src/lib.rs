@@ -6,7 +6,7 @@
 
 mod server;
 
-pub use server::run_harness;
+pub use server::{run_harness, run_harness_async};
 
 use std::collections::HashMap;
 use std::time::Duration;

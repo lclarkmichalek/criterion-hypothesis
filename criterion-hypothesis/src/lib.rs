@@ -21,6 +21,7 @@ pub use build::BuildManager;
 pub use cli::Cli;
 pub use config::Config;
 pub use orchestrator::{
-    run_with_urls, BenchmarkSamples, HarnessHandle, Orchestrator, OrchestratorError,
+    run_with_urls, wait_for_health, BenchmarkSamples, HarnessHandle, Orchestrator,
+    OrchestratorError,
 };
 pub use source::{GitWorktreeProvider, SourceProvider};

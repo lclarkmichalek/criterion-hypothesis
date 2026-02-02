@@ -296,3 +296,243 @@ mod report_tests {
         assert!(result.is_ok());
     }
 }
+
+/// Integration tests with real harnesses.
+///
+/// These tests spin up actual harness servers and test orchestrator communication
+/// without requiring git worktrees or cargo builds.
+#[cfg(test)]
+mod harness_integration_tests {
+    use criterion_hypothesis::{run_with_urls, wait_for_health, HarnessHandle};
+    use criterion_hypothesis_harness::{run_harness_async, BenchmarkRegistry};
+    use std::time::{Duration, Instant};
+
+    /// Find a free port for testing.
+    fn find_free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    /// Create a test registry with a simple benchmark.
+    fn create_test_registry(delay_micros: u64) -> BenchmarkRegistry {
+        let mut registry = BenchmarkRegistry::new();
+        registry.register("test_bench", move || {
+            let start = Instant::now();
+            std::thread::sleep(Duration::from_micros(delay_micros));
+            start.elapsed()
+        });
+        registry
+    }
+
+    /// Test that we can connect to a running harness and check its health.
+    #[tokio::test]
+    async fn test_harness_health_check() {
+        let port = find_free_port();
+        let registry = create_test_registry(100);
+
+        // Spawn harness in a background task
+        let harness_task = tokio::spawn(async move {
+            run_harness_async(registry, port).await.unwrap();
+        });
+
+        // Connect and check health
+        let mut handle = HarnessHandle::connect(&format!("http://127.0.0.1:{}", port)).unwrap();
+
+        // Wait for harness to be ready
+        let result = wait_for_health(&handle, Duration::from_secs(5)).await;
+        assert!(result.is_ok(), "Health check failed: {:?}", result);
+
+        // Shutdown
+        let _ = handle.shutdown().await;
+        harness_task.abort();
+    }
+
+    /// Test that we can list benchmarks from a running harness.
+    #[tokio::test]
+    async fn test_harness_list_benchmarks() {
+        let port = find_free_port();
+        let registry = create_test_registry(100);
+
+        let harness_task = tokio::spawn(async move {
+            run_harness_async(registry, port).await.unwrap();
+        });
+
+        let mut handle = HarnessHandle::connect(&format!("http://127.0.0.1:{}", port)).unwrap();
+        wait_for_health(&handle, Duration::from_secs(5)).await.unwrap();
+
+        let benchmarks = handle.list_benchmarks().await.unwrap();
+        assert_eq!(benchmarks.len(), 1);
+        assert!(benchmarks.contains(&"test_bench".to_string()));
+
+        let _ = handle.shutdown().await;
+        harness_task.abort();
+    }
+
+    /// Test that we can run a benchmark iteration.
+    #[tokio::test]
+    async fn test_harness_run_iteration() {
+        let port = find_free_port();
+        let registry = create_test_registry(500); // 500 microseconds
+
+        let harness_task = tokio::spawn(async move {
+            run_harness_async(registry, port).await.unwrap();
+        });
+
+        let mut handle = HarnessHandle::connect(&format!("http://127.0.0.1:{}", port)).unwrap();
+        wait_for_health(&handle, Duration::from_secs(5)).await.unwrap();
+
+        let duration = handle.run_iteration("test_bench").await.unwrap();
+
+        // Should be at least 500 microseconds
+        assert!(
+            duration >= Duration::from_micros(400),
+            "Duration {:?} is too short",
+            duration
+        );
+        // But not too long (allow some slack for scheduling)
+        assert!(
+            duration < Duration::from_millis(50),
+            "Duration {:?} is too long",
+            duration
+        );
+
+        let _ = handle.shutdown().await;
+        harness_task.abort();
+    }
+
+    /// Test full E2E comparison with manual URLs.
+    #[tokio::test]
+    async fn test_e2e_manual_mode() {
+        let baseline_port = find_free_port();
+        let candidate_port = find_free_port();
+
+        // Baseline is slower (1000 microseconds)
+        let baseline_registry = create_test_registry(1000);
+        // Candidate is faster (500 microseconds)
+        let candidate_registry = create_test_registry(500);
+
+        // Spawn both harnesses
+        let baseline_task = tokio::spawn(async move {
+            run_harness_async(baseline_registry, baseline_port).await.unwrap();
+        });
+        let candidate_task = tokio::spawn(async move {
+            run_harness_async(candidate_registry, candidate_port).await.unwrap();
+        });
+
+        // Wait for both to be ready
+        let baseline_url = format!("http://127.0.0.1:{}", baseline_port);
+        let candidate_url = format!("http://127.0.0.1:{}", candidate_port);
+
+        let mut baseline_handle = HarnessHandle::connect(&baseline_url).unwrap();
+        let mut candidate_handle = HarnessHandle::connect(&candidate_url).unwrap();
+
+        wait_for_health(&baseline_handle, Duration::from_secs(5))
+            .await
+            .unwrap();
+        wait_for_health(&candidate_handle, Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        // Run comparison
+        let samples = run_with_urls(
+            &baseline_url,
+            &candidate_url,
+            Duration::from_secs(5),
+            2,  // warmup
+            10, // sample size
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap();
+
+        // Verify results
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].name, "test_bench");
+        assert_eq!(samples[0].baseline_samples.len(), 10);
+        assert_eq!(samples[0].candidate_samples.len(), 10);
+
+        // Baseline should be slower on average
+        let baseline_mean: f64 = samples[0]
+            .baseline_samples
+            .iter()
+            .map(|d| d.as_nanos() as f64)
+            .sum::<f64>()
+            / 10.0;
+        let candidate_mean: f64 = samples[0]
+            .candidate_samples
+            .iter()
+            .map(|d| d.as_nanos() as f64)
+            .sum::<f64>()
+            / 10.0;
+
+        assert!(
+            baseline_mean > candidate_mean,
+            "Expected baseline ({}) to be slower than candidate ({})",
+            baseline_mean,
+            candidate_mean
+        );
+
+        // Shutdown
+        let _ = baseline_handle.shutdown().await;
+        let _ = candidate_handle.shutdown().await;
+        baseline_task.abort();
+        candidate_task.abort();
+    }
+
+    /// Test that benchmark mismatch is detected correctly.
+    #[tokio::test]
+    async fn test_benchmark_mismatch_detection() {
+        let baseline_port = find_free_port();
+        let candidate_port = find_free_port();
+
+        // Baseline has "bench_a"
+        let mut baseline_registry = BenchmarkRegistry::new();
+        baseline_registry.register("bench_a", || Duration::from_micros(100));
+
+        // Candidate has "bench_b" - different name!
+        let mut candidate_registry = BenchmarkRegistry::new();
+        candidate_registry.register("bench_b", || Duration::from_micros(100));
+
+        let baseline_task = tokio::spawn(async move {
+            run_harness_async(baseline_registry, baseline_port).await.unwrap();
+        });
+        let candidate_task = tokio::spawn(async move {
+            run_harness_async(candidate_registry, candidate_port).await.unwrap();
+        });
+
+        let baseline_url = format!("http://127.0.0.1:{}", baseline_port);
+        let candidate_url = format!("http://127.0.0.1:{}", candidate_port);
+
+        let mut baseline_handle = HarnessHandle::connect(&baseline_url).unwrap();
+        let mut candidate_handle = HarnessHandle::connect(&candidate_url).unwrap();
+
+        wait_for_health(&baseline_handle, Duration::from_secs(5))
+            .await
+            .unwrap();
+        wait_for_health(&candidate_handle, Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        // Run comparison - should fail with mismatch error
+        let result = run_with_urls(
+            &baseline_url,
+            &candidate_url,
+            Duration::from_secs(5),
+            1,
+            5,
+            Duration::from_millis(10),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Benchmark mismatch"),
+            "Expected benchmark mismatch error, got: {}",
+            err
+        );
+
+        baseline_task.abort();
+        candidate_task.abort();
+    }
+}

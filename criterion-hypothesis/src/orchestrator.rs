@@ -8,11 +8,15 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use thiserror::Error;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command as TokioCommand;
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
+use uuid::Uuid;
 
 use criterion_hypothesis_core::protocol::{
-    BenchmarkListResponse, HealthResponse, RunIterationRequest, RunIterationResponse,
-    ShutdownResponse,
+    BenchmarkListResponse, ClaimRequest, ClaimResponse, HealthResponse, ReleaseRequest,
+    RunIterationRequest, RunIterationResponse, ShutdownResponse, CLAIM_HEADER,
 };
 
 /// Errors that can occur during orchestration.
@@ -52,18 +56,28 @@ pub enum OrchestratorError {
     /// Invalid URL provided.
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),
+
+    /// Failed to claim harness (already claimed by another orchestrator).
+    #[error("Failed to claim harness: {0}")]
+    ClaimError(String),
 }
 
 /// Handle to a running harness process (spawned by us).
 pub struct HarnessHandle {
-    /// The child process (None for remote harnesses).
+    /// The child process (None for remote harnesses, uses std::process).
     process: Option<Child>,
+    /// Tokio child process (for async output streaming).
+    tokio_process: Option<tokio::process::Child>,
     /// Base URL for the harness.
     base_url: String,
     /// HTTP client for communication.
     client: reqwest::Client,
     /// Whether this is a managed process (spawned by us) or remote.
     is_managed: bool,
+    /// Output streaming tasks (if enabled).
+    output_tasks: Vec<JoinHandle<()>>,
+    /// Claim nonce for exclusive access (None if not claimed).
+    claim_nonce: Option<String>,
 }
 
 impl HarnessHandle {
@@ -78,19 +92,25 @@ impl HarnessHandle {
     ///
     /// Returns an error if the process cannot be spawned.
     pub async fn spawn(binary: &Path, port: u16) -> Result<Self, OrchestratorError> {
-        let process = Command::new(binary)
-            .env("CH_PORT", port.to_string())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                OrchestratorError::SpawnError(format!(
-                    "Failed to spawn {}: {}",
-                    binary.display(),
-                    e
-                ))
-            })?;
+        Self::spawn_with_output(binary, port, None).await
+    }
 
+    /// Spawn a new harness process with optional output streaming.
+    ///
+    /// # Arguments
+    ///
+    /// * `binary` - Path to the harness binary
+    /// * `port` - Port for the harness to listen on
+    /// * `output_label` - If Some, stream stdout/stderr with this prefix to stderr
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the process cannot be spawned.
+    pub async fn spawn_with_output(
+        binary: &Path,
+        port: u16,
+        output_label: Option<&str>,
+    ) -> Result<Self, OrchestratorError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -98,12 +118,81 @@ impl HarnessHandle {
                 OrchestratorError::SpawnError(format!("Failed to create HTTP client: {}", e))
             })?;
 
-        Ok(Self {
-            process: Some(process),
-            base_url: format!("http://127.0.0.1:{}", port),
-            client,
-            is_managed: true,
-        })
+        if let Some(label) = output_label {
+            // Use tokio::process for async output streaming
+            let mut child = TokioCommand::new(binary)
+                .env("CH_PORT", port.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| {
+                    OrchestratorError::SpawnError(format!(
+                        "Failed to spawn {}: {}",
+                        binary.display(),
+                        e
+                    ))
+                })?;
+
+            let mut output_tasks = Vec::new();
+
+            // Spawn task to stream stdout
+            if let Some(stdout) = child.stdout.take() {
+                let label = label.to_string();
+                output_tasks.push(tokio::spawn(async move {
+                    let reader = BufReader::new(stdout);
+                    let mut lines = reader.lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        eprintln!("[{} stdout] {}", label, line);
+                    }
+                }));
+            }
+
+            // Spawn task to stream stderr
+            if let Some(stderr) = child.stderr.take() {
+                let label = label.to_string();
+                output_tasks.push(tokio::spawn(async move {
+                    let reader = BufReader::new(stderr);
+                    let mut lines = reader.lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        eprintln!("[{} stderr] {}", label, line);
+                    }
+                }));
+            }
+
+            Ok(Self {
+                process: None,
+                tokio_process: Some(child),
+                base_url: format!("http://127.0.0.1:{}", port),
+                client,
+                is_managed: true,
+                output_tasks,
+                claim_nonce: None,
+            })
+        } else {
+            // Use std::process without output streaming
+            let process = Command::new(binary)
+                .env("CH_PORT", port.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| {
+                    OrchestratorError::SpawnError(format!(
+                        "Failed to spawn {}: {}",
+                        binary.display(),
+                        e
+                    ))
+                })?;
+
+            Ok(Self {
+                process: Some(process),
+                tokio_process: None,
+                base_url: format!("http://127.0.0.1:{}", port),
+                client,
+                is_managed: true,
+                output_tasks: Vec::new(),
+                claim_nonce: None,
+            })
+        }
     }
 
     /// Connect to an already-running harness at the given URL.
@@ -136,9 +225,12 @@ impl HarnessHandle {
 
         Ok(Self {
             process: None,
+            tokio_process: None,
             base_url,
             client,
             is_managed: false,
+            output_tasks: Vec::new(),
+            claim_nonce: None,
         })
     }
 
@@ -166,6 +258,51 @@ impl HarnessHandle {
         }
     }
 
+    /// Claim exclusive access to the harness.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the harness is already claimed by another orchestrator.
+    pub async fn claim(&mut self) -> Result<(), OrchestratorError> {
+        let nonce = Uuid::new_v4().to_string();
+        let url = format!("{}/claim", self.base_url());
+        let request = ClaimRequest::new(&nonce);
+
+        let response: ClaimResponse = self
+            .client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        if response.success {
+            self.claim_nonce = Some(nonce);
+            Ok(())
+        } else {
+            Err(OrchestratorError::ClaimError(
+                response
+                    .error
+                    .unwrap_or_else(|| "Unknown claim error".to_string()),
+            ))
+        }
+    }
+
+    /// Release the claim on the harness.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the release request fails.
+    pub async fn release(&mut self) -> Result<(), OrchestratorError> {
+        if let Some(nonce) = self.claim_nonce.take() {
+            let url = format!("{}/release", self.base_url());
+            let request = ReleaseRequest::new(&nonce);
+            let _ = self.client.post(&url).json(&request).send().await?;
+        }
+        Ok(())
+    }
+
     /// Get the list of available benchmarks.
     ///
     /// # Errors
@@ -173,7 +310,11 @@ impl HarnessHandle {
     /// Returns an error if the request fails.
     pub async fn list_benchmarks(&self) -> Result<Vec<String>, OrchestratorError> {
         let url = format!("{}/benchmarks", self.base_url());
-        let response: BenchmarkListResponse = self.client.get(&url).send().await?.json().await?;
+        let mut req = self.client.get(&url);
+        if let Some(nonce) = &self.claim_nonce {
+            req = req.header(CLAIM_HEADER, nonce);
+        }
+        let response: BenchmarkListResponse = req.send().await?.json().await?;
         Ok(response.benchmarks)
     }
 
@@ -190,14 +331,12 @@ impl HarnessHandle {
         let url = format!("{}/run", self.base_url());
         let request = RunIterationRequest::new(benchmark_id);
 
-        let response: RunIterationResponse = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let mut req = self.client.post(&url).json(&request);
+        if let Some(nonce) = &self.claim_nonce {
+            req = req.header(CLAIM_HEADER, nonce);
+        }
+
+        let response: RunIterationResponse = req.send().await?.json().await?;
 
         if response.success {
             Ok(response.duration())
@@ -215,22 +354,43 @@ impl HarnessHandle {
     /// # Errors
     ///
     /// Returns an error if the shutdown request fails.
-    pub async fn shutdown(&self) -> Result<(), OrchestratorError> {
+    pub async fn shutdown(&mut self) -> Result<(), OrchestratorError> {
+        // Release claim first
+        self.release().await?;
+
         let url = format!("{}/shutdown", self.base_url());
-        let _response: ShutdownResponse = self.client.post(&url).send().await?.json().await?;
+        let mut req = self.client.post(&url);
+        if let Some(nonce) = &self.claim_nonce {
+            req = req.header(CLAIM_HEADER, nonce);
+        }
+        let _response: ShutdownResponse = req.send().await?.json().await?;
         Ok(())
     }
 
     /// Kill the harness process forcefully (only for managed processes).
     pub fn kill(&mut self) {
+        // Abort output streaming tasks
+        for task in self.output_tasks.drain(..) {
+            task.abort();
+        }
+
+        // Kill std::process
         if let Some(ref mut process) = self.process {
             let _ = process.kill();
+        }
+
+        // Kill tokio::process (note: this is sync, use start_kill)
+        if let Some(ref mut process) = self.tokio_process {
+            let _ = process.start_kill();
         }
     }
 
     /// Get the process ID of the harness (only for managed processes).
     pub fn pid(&self) -> Option<u32> {
-        self.process.as_ref().map(|p| p.id())
+        self.process
+            .as_ref()
+            .map(|p| p.id())
+            .or_else(|| self.tokio_process.as_ref().and_then(|p| p.id()))
     }
 
     /// Check if this is a managed (spawned) harness.
@@ -268,6 +428,8 @@ pub struct Orchestrator {
     sample_size: u32,
     /// Interval between interleaved benchmark runs.
     interleave_interval: Duration,
+    /// Whether to show harness stdout/stderr output.
+    show_output: bool,
 }
 
 /// Collected benchmark samples for a single benchmark.
@@ -314,6 +476,8 @@ impl Orchestrator {
     /// * `warmup_iterations` - Number of warmup iterations to discard
     /// * `sample_size` - Number of samples to collect
     /// * `interleave_interval` - Interval between interleaved benchmark runs
+    /// * `show_output` - Whether to show harness stdout/stderr
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         baseline_binary: PathBuf,
         candidate_binary: PathBuf,
@@ -322,6 +486,7 @@ impl Orchestrator {
         warmup_iterations: u32,
         sample_size: u32,
         interleave_interval: Duration,
+        show_output: bool,
     ) -> Self {
         Self {
             baseline_binary,
@@ -331,6 +496,7 @@ impl Orchestrator {
             warmup_iterations,
             sample_size,
             interleave_interval,
+            show_output,
         }
     }
 
@@ -351,13 +517,33 @@ impl Orchestrator {
     /// Returns an error if any step fails.
     pub async fn run(&self) -> Result<Vec<BenchmarkSamples>, OrchestratorError> {
         // 1. Spawn both harnesses
-        let mut baseline = HarnessHandle::spawn(&self.baseline_binary, self.base_port).await?;
-        let mut candidate =
-            HarnessHandle::spawn(&self.candidate_binary, self.base_port + 1).await?;
+        let baseline_label = if self.show_output {
+            Some("baseline")
+        } else {
+            None
+        };
+        let candidate_label = if self.show_output {
+            Some("candidate")
+        } else {
+            None
+        };
+
+        let mut baseline = HarnessHandle::spawn_with_output(
+            &self.baseline_binary,
+            self.base_port,
+            baseline_label,
+        )
+        .await?;
+        let mut candidate = HarnessHandle::spawn_with_output(
+            &self.candidate_binary,
+            self.base_port + 1,
+            candidate_label,
+        )
+        .await?;
 
         // Use a guard to ensure harnesses are killed on error
         let result = self
-            .run_with_harnesses(&baseline, &candidate, self.timeout)
+            .run_with_harnesses(&mut baseline, &mut candidate, self.timeout)
             .await;
 
         // 5. Shutdown harnesses (attempt graceful shutdown, then kill)
@@ -377,29 +563,62 @@ impl Orchestrator {
     /// Run benchmarks with already-spawned harnesses.
     async fn run_with_harnesses(
         &self,
-        baseline: &HarnessHandle,
-        candidate: &HarnessHandle,
+        baseline: &mut HarnessHandle,
+        candidate: &mut HarnessHandle,
         timeout: Duration,
     ) -> Result<Vec<BenchmarkSamples>, OrchestratorError> {
         // 2. Wait for health checks
+        eprint!("  Waiting for baseline harness... ");
         wait_for_health(baseline, timeout).await?;
+        eprintln!("ready");
+
+        eprint!("  Waiting for candidate harness... ");
         wait_for_health(candidate, timeout).await?;
+        eprintln!("ready");
+
+        // 3. Claim exclusive access to both harnesses
+        eprint!("  Claiming baseline harness... ");
+        baseline.claim().await?;
+        eprintln!("claimed");
+
+        eprint!("  Claiming candidate harness... ");
+        candidate.claim().await?;
+        eprintln!("claimed");
 
         // 3. Get benchmark lists and validate they match
         let baseline_benchmarks = baseline.list_benchmarks().await?;
         let candidate_benchmarks = candidate.list_benchmarks().await?;
 
-        if baseline_benchmarks != candidate_benchmarks {
+        // Compare as sets (order doesn't matter)
+        let mut baseline_sorted = baseline_benchmarks.clone();
+        let mut candidate_sorted = candidate_benchmarks.clone();
+        baseline_sorted.sort();
+        candidate_sorted.sort();
+
+        if baseline_sorted != candidate_sorted {
             return Err(OrchestratorError::BenchmarkMismatch {
                 baseline: baseline_benchmarks,
                 candidate: candidate_benchmarks,
             });
         }
 
+        eprintln!(
+            "  Found {} benchmark(s): {}",
+            baseline_sorted.len(),
+            baseline_sorted.join(", ")
+        );
+
         // 4. For each benchmark, collect samples
         let mut results = Vec::new();
+        let total_benchmarks = baseline_benchmarks.len();
 
-        for benchmark_name in &baseline_benchmarks {
+        for (idx, benchmark_name) in baseline_benchmarks.iter().enumerate() {
+            eprintln!(
+                "  [{}/{}] {}",
+                idx + 1,
+                total_benchmarks,
+                benchmark_name
+            );
             let samples = self
                 .collect_benchmark_samples(benchmark_name, baseline, candidate)
                 .await?;
@@ -419,15 +638,23 @@ impl Orchestrator {
         let mut samples = BenchmarkSamples::new(benchmark_name);
 
         // Run warmup iterations (discarded)
-        for _ in 0..self.warmup_iterations {
-            baseline.run_iteration(benchmark_name).await?;
-            sleep(self.interleave_interval).await;
-            candidate.run_iteration(benchmark_name).await?;
-            sleep(self.interleave_interval).await;
+        if self.warmup_iterations > 0 {
+            eprint!(
+                "      warming up ({} iterations)... ",
+                self.warmup_iterations
+            );
+            for _ in 0..self.warmup_iterations {
+                baseline.run_iteration(benchmark_name).await?;
+                sleep(self.interleave_interval).await;
+                candidate.run_iteration(benchmark_name).await?;
+                sleep(self.interleave_interval).await;
+            }
+            eprintln!("done");
         }
 
         // Collect interleaved samples
-        for _ in 0..self.sample_size {
+        eprint!("      collecting {} samples... ", self.sample_size);
+        for i in 0..self.sample_size {
             // Run baseline
             let baseline_duration = baseline.run_iteration(benchmark_name).await?;
             samples.add_baseline(baseline_duration);
@@ -441,7 +668,16 @@ impl Orchestrator {
 
             // Wait before next pair
             sleep(self.interleave_interval).await;
+
+            // Progress indicator every 10 samples
+            if (i + 1) % 10 == 0 {
+                eprint!("{}", i + 1);
+                if i + 1 < self.sample_size {
+                    eprint!("...");
+                }
+            }
         }
+        eprintln!(" done");
 
         Ok(samples)
     }
@@ -499,40 +735,74 @@ pub async fn run_with_urls(
     interleave_interval: Duration,
 ) -> Result<Vec<BenchmarkSamples>, OrchestratorError> {
     // Connect to remote harnesses
-    let baseline = HarnessHandle::connect(baseline_url)?;
-    let candidate = HarnessHandle::connect(candidate_url)?;
+    let mut baseline = HarnessHandle::connect(baseline_url)?;
+    let mut candidate = HarnessHandle::connect(candidate_url)?;
 
     // Wait for health checks
+    eprint!("  Waiting for baseline harness... ");
     wait_for_health(&baseline, timeout).await?;
+    eprintln!("ready");
+
+    eprint!("  Waiting for candidate harness... ");
     wait_for_health(&candidate, timeout).await?;
+    eprintln!("ready");
+
+    // Claim exclusive access to both harnesses
+    eprint!("  Claiming baseline harness... ");
+    baseline.claim().await?;
+    eprintln!("claimed");
+
+    eprint!("  Claiming candidate harness... ");
+    candidate.claim().await?;
+    eprintln!("claimed");
 
     // Get benchmark lists and validate they match
     let baseline_benchmarks = baseline.list_benchmarks().await?;
     let candidate_benchmarks = candidate.list_benchmarks().await?;
 
-    if baseline_benchmarks != candidate_benchmarks {
+    // Compare as sets (order doesn't matter)
+    let mut baseline_sorted = baseline_benchmarks.clone();
+    let mut candidate_sorted = candidate_benchmarks.clone();
+    baseline_sorted.sort();
+    candidate_sorted.sort();
+
+    if baseline_sorted != candidate_sorted {
         return Err(OrchestratorError::BenchmarkMismatch {
             baseline: baseline_benchmarks,
             candidate: candidate_benchmarks,
         });
     }
 
+    eprintln!(
+        "  Found {} benchmark(s): {}",
+        baseline_sorted.len(),
+        baseline_sorted.join(", ")
+    );
+
     // Collect samples for each benchmark
     let mut results = Vec::new();
+    let total_benchmarks = baseline_benchmarks.len();
 
-    for benchmark_name in &baseline_benchmarks {
+    for (idx, benchmark_name) in baseline_benchmarks.iter().enumerate() {
+        eprintln!("  [{}/{}] {}", idx + 1, total_benchmarks, benchmark_name);
+
         let mut samples = BenchmarkSamples::new(benchmark_name);
 
         // Run warmup iterations (discarded)
-        for _ in 0..warmup_iterations {
-            baseline.run_iteration(benchmark_name).await?;
-            sleep(interleave_interval).await;
-            candidate.run_iteration(benchmark_name).await?;
-            sleep(interleave_interval).await;
+        if warmup_iterations > 0 {
+            eprint!("      warming up ({} iterations)... ", warmup_iterations);
+            for _ in 0..warmup_iterations {
+                baseline.run_iteration(benchmark_name).await?;
+                sleep(interleave_interval).await;
+                candidate.run_iteration(benchmark_name).await?;
+                sleep(interleave_interval).await;
+            }
+            eprintln!("done");
         }
 
         // Collect interleaved samples
-        for _ in 0..sample_size {
+        eprint!("      collecting {} samples... ", sample_size);
+        for i in 0..sample_size {
             let baseline_duration = baseline.run_iteration(benchmark_name).await?;
             samples.add_baseline(baseline_duration);
 
@@ -542,12 +812,23 @@ pub async fn run_with_urls(
             samples.add_candidate(candidate_duration);
 
             sleep(interleave_interval).await;
+
+            // Progress indicator every 10 samples
+            if (i + 1) % 10 == 0 {
+                eprint!("{}", i + 1);
+                if i + 1 < sample_size {
+                    eprint!("...");
+                }
+            }
         }
+        eprintln!(" done");
 
         results.push(samples);
     }
 
-    // Note: We do NOT shutdown remote harnesses - they're managed externally
+    // Release claims (but don't shutdown - remote harnesses are managed externally)
+    let _ = baseline.release().await;
+    let _ = candidate.release().await;
 
     Ok(results)
 }
@@ -589,9 +870,11 @@ mod tests {
             3,
             100,
             Duration::from_millis(100),
+            false,
         );
 
         assert_eq!(orchestrator.base_port, 9100);
+        assert!(!orchestrator.show_output);
         assert_eq!(orchestrator.warmup_iterations, 3);
         assert_eq!(orchestrator.sample_size, 100);
     }
