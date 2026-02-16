@@ -88,7 +88,11 @@ async fn run_iteration(
             if count % LOG_INTERVAL == 0 {
                 eprintln!("[harness] {} iterations completed", count);
             }
-            (StatusCode::OK, Json(RunIterationResponse::success(duration))).into_response()
+            (
+                StatusCode::OK,
+                Json(RunIterationResponse::success(duration)),
+            )
+                .into_response()
         }
         None => {
             eprintln!("[harness] Benchmark '{}' not found", request.benchmark_id);
@@ -108,10 +112,7 @@ async fn run_iteration(
 ///
 /// POST /shutdown
 /// Returns: { "status": "shutting_down" }
-async fn shutdown(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn shutdown(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     // Check claim if harness is claimed
     if let Err(response) = check_claim(&state, &headers).await {
         return response;
@@ -146,7 +147,10 @@ async fn claim(
         }
         None => {
             // Claim it
-            eprintln!("[harness] Claimed by orchestrator (nonce: {}...)", &request.nonce[..8.min(request.nonce.len())]);
+            eprintln!(
+                "[harness] Claimed by orchestrator (nonce: {}...)",
+                &request.nonce[..8.min(request.nonce.len())]
+            );
             *claim = Some(request.nonce);
             (StatusCode::OK, Json(ClaimResponse::success()))
         }

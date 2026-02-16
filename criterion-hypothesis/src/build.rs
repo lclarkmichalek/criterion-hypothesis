@@ -106,7 +106,11 @@ impl BuildManager {
     ///
     /// Like `build()`, but runs `cargo build --bench <name>` instead of `--benches`,
     /// allowing selective building when multiple bench targets exist.
-    pub fn build_bench(&self, source_path: &Path, bench_name: &str) -> Result<BuildResult, BuildError> {
+    pub fn build_bench(
+        &self,
+        source_path: &Path,
+        bench_name: &str,
+    ) -> Result<BuildResult, BuildError> {
         let cargo_toml = source_path.join("Cargo.toml");
         if !cargo_toml.exists() {
             return Err(BuildError::NoCargoToml(source_path.to_path_buf()));
@@ -120,7 +124,11 @@ impl BuildManager {
     }
 
     /// Run cargo build for a specific bench target.
-    fn run_cargo_build_bench(&self, source_path: &Path, bench_name: &str) -> Result<(), BuildError> {
+    fn run_cargo_build_bench(
+        &self,
+        source_path: &Path,
+        bench_name: &str,
+    ) -> Result<(), BuildError> {
         let mut cmd = Command::new("cargo");
         cmd.current_dir(source_path);
         cmd.arg("build");

@@ -192,10 +192,9 @@ async fn run_automatic_mode(
             );
 
             all_samples.extend(
-                orchestrator
-                    .run()
-                    .await
-                    .with_context(|| format!("Failed to run benchmarks for bench '{}'", bench_name))?,
+                orchestrator.run().await.with_context(|| {
+                    format!("Failed to run benchmarks for bench '{}'", bench_name)
+                })?,
             );
         }
     };

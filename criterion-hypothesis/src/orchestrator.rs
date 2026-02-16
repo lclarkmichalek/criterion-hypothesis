@@ -528,12 +528,9 @@ impl Orchestrator {
             None
         };
 
-        let mut baseline = HarnessHandle::spawn_with_output(
-            &self.baseline_binary,
-            self.base_port,
-            baseline_label,
-        )
-        .await?;
+        let mut baseline =
+            HarnessHandle::spawn_with_output(&self.baseline_binary, self.base_port, baseline_label)
+                .await?;
         let mut candidate = HarnessHandle::spawn_with_output(
             &self.candidate_binary,
             self.base_port + 1,
@@ -613,12 +610,7 @@ impl Orchestrator {
         let total_benchmarks = baseline_benchmarks.len();
 
         for (idx, benchmark_name) in baseline_benchmarks.iter().enumerate() {
-            eprintln!(
-                "  [{}/{}] {}",
-                idx + 1,
-                total_benchmarks,
-                benchmark_name
-            );
+            eprintln!("  [{}/{}] {}", idx + 1, total_benchmarks, benchmark_name);
             let samples = self
                 .collect_benchmark_samples(benchmark_name, baseline, candidate)
                 .await?;

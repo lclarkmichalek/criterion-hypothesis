@@ -358,7 +358,9 @@ mod harness_integration_tests {
         });
 
         let mut handle = HarnessHandle::connect(&format!("http://127.0.0.1:{}", port)).unwrap();
-        wait_for_health(&handle, Duration::from_secs(5)).await.unwrap();
+        wait_for_health(&handle, Duration::from_secs(5))
+            .await
+            .unwrap();
 
         let benchmarks = handle.list_benchmarks().await.unwrap();
         assert_eq!(benchmarks.len(), 1);
@@ -379,7 +381,9 @@ mod harness_integration_tests {
         });
 
         let mut handle = HarnessHandle::connect(&format!("http://127.0.0.1:{}", port)).unwrap();
-        wait_for_health(&handle, Duration::from_secs(5)).await.unwrap();
+        wait_for_health(&handle, Duration::from_secs(5))
+            .await
+            .unwrap();
 
         let duration = handle.run_iteration("test_bench").await.unwrap();
 
@@ -413,10 +417,14 @@ mod harness_integration_tests {
 
         // Spawn both harnesses
         let baseline_task = tokio::spawn(async move {
-            run_harness_async(baseline_registry, baseline_port).await.unwrap();
+            run_harness_async(baseline_registry, baseline_port)
+                .await
+                .unwrap();
         });
         let candidate_task = tokio::spawn(async move {
-            run_harness_async(candidate_registry, candidate_port).await.unwrap();
+            run_harness_async(candidate_registry, candidate_port)
+                .await
+                .unwrap();
         });
 
         // Wait for both to be ready
@@ -494,10 +502,14 @@ mod harness_integration_tests {
         candidate_registry.register("bench_b", || Duration::from_micros(100));
 
         let baseline_task = tokio::spawn(async move {
-            run_harness_async(baseline_registry, baseline_port).await.unwrap();
+            run_harness_async(baseline_registry, baseline_port)
+                .await
+                .unwrap();
         });
         let candidate_task = tokio::spawn(async move {
-            run_harness_async(candidate_registry, candidate_port).await.unwrap();
+            run_harness_async(candidate_registry, candidate_port)
+                .await
+                .unwrap();
         });
 
         let baseline_url = format!("http://127.0.0.1:{}", baseline_port);

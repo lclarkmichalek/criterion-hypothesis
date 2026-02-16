@@ -223,14 +223,8 @@ mod tests {
 
         assert!(cli.baseline.is_none());
         assert!(cli.candidate.is_none());
-        assert_eq!(
-            cli.baseline_url,
-            Some("http://localhost:9100".to_string())
-        );
-        assert_eq!(
-            cli.candidate_url,
-            Some("http://localhost:9101".to_string())
-        );
+        assert_eq!(cli.baseline_url, Some("http://localhost:9100".to_string()));
+        assert_eq!(cli.candidate_url, Some("http://localhost:9101".to_string()));
         assert!(cli.is_manual_mode());
     }
 
