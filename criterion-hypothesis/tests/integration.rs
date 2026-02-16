@@ -503,8 +503,8 @@ mod harness_integration_tests {
         let baseline_url = format!("http://127.0.0.1:{}", baseline_port);
         let candidate_url = format!("http://127.0.0.1:{}", candidate_port);
 
-        let mut baseline_handle = HarnessHandle::connect(&baseline_url).unwrap();
-        let mut candidate_handle = HarnessHandle::connect(&candidate_url).unwrap();
+        let baseline_handle = HarnessHandle::connect(&baseline_url).unwrap();
+        let candidate_handle = HarnessHandle::connect(&candidate_url).unwrap();
 
         wait_for_health(&baseline_handle, Duration::from_secs(5))
             .await

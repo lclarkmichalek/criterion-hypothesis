@@ -49,6 +49,10 @@ pub struct Cli {
     #[arg(long)]
     pub project_path: Option<PathBuf>,
 
+    /// Specific bench target(s) to build and run (repeatable)
+    #[arg(long)]
+    pub bench: Vec<String>,
+
     /// Verbose output
     #[arg(short, long)]
     pub verbose: bool,
@@ -96,6 +100,7 @@ mod tests {
             warmup_iterations: Some(20),
             config: "custom.toml".to_string(),
             project_path: None,
+            bench: vec![],
             verbose: true,
         };
 
@@ -120,6 +125,7 @@ mod tests {
             warmup_iterations: None,
             config: ".criterion-hypothesis.toml".to_string(),
             project_path: None,
+            bench: vec![],
             verbose: false,
         };
 
@@ -149,6 +155,7 @@ mod tests {
             warmup_iterations: Some(5),
             config: ".criterion-hypothesis.toml".to_string(),
             project_path: None,
+            bench: vec![],
             verbose: false,
         };
 
@@ -225,6 +232,23 @@ mod tests {
             Some("http://localhost:9101".to_string())
         );
         assert!(cli.is_manual_mode());
+    }
+
+    #[test]
+    fn test_cli_parse_bench_targets() {
+        let cli = Cli::parse_from([
+            "criterion-hypothesis",
+            "--baseline",
+            "main",
+            "--candidate",
+            "HEAD",
+            "--bench",
+            "ch_bench_foo",
+            "--bench",
+            "ch_bench_bar",
+        ]);
+
+        assert_eq!(cli.bench, vec!["ch_bench_foo", "ch_bench_bar"]);
     }
 
     #[test]

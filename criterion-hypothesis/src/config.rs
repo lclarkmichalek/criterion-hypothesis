@@ -51,6 +51,8 @@ pub struct BuildConfig {
     pub profile: String,
     /// Additional flags to pass to cargo.
     pub cargo_flags: Vec<String>,
+    /// Specific bench targets to build and run (if empty, builds all with --benches).
+    pub bench_targets: Vec<String>,
 }
 
 /// Network configuration for harness communication.
@@ -87,6 +89,7 @@ impl Default for BuildConfig {
         Self {
             profile: "release".to_string(),
             cargo_flags: Vec::new(),
+            bench_targets: Vec::new(),
         }
     }
 }
@@ -179,6 +182,7 @@ mod tests {
         assert_eq!(config.orchestration.sample_size, 100);
         assert_eq!(config.build.profile, "release");
         assert!(config.build.cargo_flags.is_empty());
+        assert!(config.build.bench_targets.is_empty());
         assert_eq!(config.network.base_port, 9100);
         assert_eq!(config.network.harness_timeout_ms, 30_000);
     }

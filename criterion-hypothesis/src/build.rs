@@ -102,6 +102,59 @@ impl BuildManager {
         Ok(BuildResult { binary_path })
     }
 
+    /// Build a specific bench target from the source tree.
+    ///
+    /// Like `build()`, but runs `cargo build --bench <name>` instead of `--benches`,
+    /// allowing selective building when multiple bench targets exist.
+    pub fn build_bench(&self, source_path: &Path, bench_name: &str) -> Result<BuildResult, BuildError> {
+        let cargo_toml = source_path.join("Cargo.toml");
+        if !cargo_toml.exists() {
+            return Err(BuildError::NoCargoToml(source_path.to_path_buf()));
+        }
+
+        self.run_cargo_build_bench(source_path, bench_name)?;
+
+        let binary_path = self.find_benchmark_binary(source_path)?;
+
+        Ok(BuildResult { binary_path })
+    }
+
+    /// Run cargo build for a specific bench target.
+    fn run_cargo_build_bench(&self, source_path: &Path, bench_name: &str) -> Result<(), BuildError> {
+        let mut cmd = Command::new("cargo");
+        cmd.current_dir(source_path);
+        cmd.arg("build");
+
+        if self.profile == "release" {
+            cmd.arg("--release");
+        } else if self.profile != "dev" {
+            cmd.arg("--profile");
+            cmd.arg(&self.profile);
+        }
+
+        cmd.arg("--bench");
+        cmd.arg(bench_name);
+
+        for flag in &self.cargo_flags {
+            cmd.arg(flag);
+        }
+
+        let output = cmd.output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(BuildError::BuildFailed(format!(
+                "cargo build --bench {} failed:\n{}\n{}",
+                bench_name,
+                stdout.trim(),
+                stderr.trim()
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Run cargo build with the configured profile and flags.
     fn run_cargo_build(&self, source_path: &Path) -> Result<(), BuildError> {
         let mut cmd = Command::new("cargo");
@@ -302,6 +355,14 @@ mod tests {
     fn test_no_cargo_toml_error() {
         let manager = BuildManager::new("release".to_string(), vec![]);
         let result = manager.build(Path::new("/nonexistent/path"));
+
+        assert!(matches!(result, Err(BuildError::NoCargoToml(_))));
+    }
+
+    #[test]
+    fn test_build_bench_no_cargo_toml_error() {
+        let manager = BuildManager::new("release".to_string(), vec![]);
+        let result = manager.build_bench(Path::new("/nonexistent/path"), "my_bench");
 
         assert!(matches!(result, Err(BuildError::NoCargoToml(_))));
     }

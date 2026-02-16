@@ -132,30 +132,75 @@ async fn run_automatic_mode(
         eprintln!("Candidate build path: {:?}", candidate_build_path);
     }
 
-    let baseline_build = builder
-        .build(&baseline_build_path)
-        .context("Failed to build baseline")?;
-    let candidate_build = builder
-        .build(&candidate_build_path)
-        .context("Failed to build candidate")?;
+    // Determine bench targets: CLI overrides config
+    let bench_targets = if !cli.bench.is_empty() {
+        cli.bench.clone()
+    } else {
+        config.build.bench_targets.clone()
+    };
 
-    // 3. Run orchestrator
-    eprintln!("Running benchmarks...");
-    let orchestrator = Orchestrator::new(
-        baseline_build.binary_path,
-        candidate_build.binary_path,
-        config.network.base_port,
-        Duration::from_millis(config.network.harness_timeout_ms),
-        config.orchestration.warmup_iterations,
-        config.orchestration.sample_size,
-        Duration::from_millis(config.orchestration.interleave_interval_ms),
-        cli.harness_output,
-    );
+    let mut all_samples = Vec::new();
 
-    let samples = orchestrator
-        .run()
-        .await
-        .context("Failed to run benchmarks")?;
+    if bench_targets.is_empty() {
+        // Legacy: build all bench targets, pick newest binary
+        let baseline_build = builder
+            .build(&baseline_build_path)
+            .context("Failed to build baseline")?;
+        let candidate_build = builder
+            .build(&candidate_build_path)
+            .context("Failed to build candidate")?;
+
+        eprintln!("Running benchmarks...");
+        let orchestrator = Orchestrator::new(
+            baseline_build.binary_path,
+            candidate_build.binary_path,
+            config.network.base_port,
+            Duration::from_millis(config.network.harness_timeout_ms),
+            config.orchestration.warmup_iterations,
+            config.orchestration.sample_size,
+            Duration::from_millis(config.orchestration.interleave_interval_ms),
+            cli.harness_output,
+        );
+
+        all_samples.extend(
+            orchestrator
+                .run()
+                .await
+                .context("Failed to run benchmarks")?,
+        );
+    } else {
+        // Build and run each bench target individually
+        for bench_name in &bench_targets {
+            eprintln!("Building bench target: {}", bench_name);
+            let baseline_build = builder
+                .build_bench(&baseline_build_path, bench_name)
+                .with_context(|| format!("Failed to build baseline for bench '{}'", bench_name))?;
+            let candidate_build = builder
+                .build_bench(&candidate_build_path, bench_name)
+                .with_context(|| format!("Failed to build candidate for bench '{}'", bench_name))?;
+
+            eprintln!("Running benchmarks for: {}", bench_name);
+            let orchestrator = Orchestrator::new(
+                baseline_build.binary_path,
+                candidate_build.binary_path,
+                config.network.base_port,
+                Duration::from_millis(config.network.harness_timeout_ms),
+                config.orchestration.warmup_iterations,
+                config.orchestration.sample_size,
+                Duration::from_millis(config.orchestration.interleave_interval_ms),
+                cli.harness_output,
+            );
+
+            all_samples.extend(
+                orchestrator
+                    .run()
+                    .await
+                    .with_context(|| format!("Failed to run benchmarks for bench '{}'", bench_name))?,
+            );
+        }
+    };
+
+    let samples = all_samples;
 
     // 4. Cleanup
     eprintln!("Cleaning up...");

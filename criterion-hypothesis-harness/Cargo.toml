@@ -3,13 +3,14 @@ name = "criterion-hypothesis-harness"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Custom harness runtime for criterion-hypothesis"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-criterion-hypothesis-core = { path = "../criterion-hypothesis-core" }
+criterion-hypothesis-core = { version = "0.2.0", path = "../criterion-hypothesis-core" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
