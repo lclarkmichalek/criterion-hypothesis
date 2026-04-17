@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use criterion_hypothesis::{
+use hypobench::{
     run_with_urls, BenchmarkComparison, BuildManager, Cli, Config, GitWorktreeProvider,
     Orchestrator, Reporter, SampleStats, SourceProvider, StatisticalTest, TerminalReporter,
     WelchTTest,
@@ -53,10 +53,7 @@ async fn main() -> Result<()> {
 }
 
 /// Run in manual mode - connect to pre-running harnesses at the specified URLs.
-async fn run_manual_mode(
-    cli: &Cli,
-    config: &Config,
-) -> Result<Vec<criterion_hypothesis::BenchmarkSamples>> {
+async fn run_manual_mode(cli: &Cli, config: &Config) -> Result<Vec<hypobench::BenchmarkSamples>> {
     let baseline_url = cli
         .baseline_url
         .as_ref()
@@ -89,7 +86,7 @@ async fn run_manual_mode(
 async fn run_automatic_mode(
     cli: &Cli,
     config: &Config,
-) -> Result<Vec<criterion_hypothesis::BenchmarkSamples>> {
+) -> Result<Vec<hypobench::BenchmarkSamples>> {
     let baseline = cli
         .baseline
         .as_ref()

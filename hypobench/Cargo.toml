@@ -1,5 +1,5 @@
 [package]
-name = "criterion-hypothesis"
+name = "hypobench"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,14 +7,14 @@ repository.workspace = true
 description = "Statistically rigorous A/B testing of benchmarks across commits"
 
 [[bin]]
-name = "criterion-hypothesis"
+name = "hypobench"
 path = "src/main.rs"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-criterion-hypothesis-core = { version = "0.3.0", path = "../criterion-hypothesis-core" }
+hypobench-core = { version = "0.4.0", path = "../hypobench-core" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -27,4 +27,4 @@ uuid = { version = "1.0", features = ["v4"] }
 
 [dev-dependencies]
 tempfile.workspace = true
-criterion-hypothesis-harness = { version = "0.3.0", path = "../criterion-hypothesis-harness" }
+hypobench-harness = { version = "0.4.0", path = "../hypobench-harness" }

@@ -1,9 +1,9 @@
-//! Integration tests for criterion-hypothesis.
+//! Integration tests for hypobench.
 //!
 //! These tests verify the interaction between the orchestrator and harness
 //! without requiring git worktrees or cargo builds.
 
-use criterion_hypothesis::{HarnessHandle, OrchestratorError};
+use hypobench::{HarnessHandle, OrchestratorError};
 
 /// Test that HarnessHandle::connect validates URLs correctly.
 #[test]
@@ -43,7 +43,7 @@ fn test_remote_handle_not_managed() {
 
 #[cfg(test)]
 mod protocol_tests {
-    use criterion_hypothesis_core::protocol::*;
+    use hypobench_core::protocol::*;
     use std::time::Duration;
 
     /// Test that protocol types serialize and deserialize correctly.
@@ -129,7 +129,7 @@ mod protocol_tests {
 
 #[cfg(test)]
 mod stats_tests {
-    use criterion_hypothesis::{Side, StatisticalTest, WelchTTest};
+    use hypobench::{Side, StatisticalTest, WelchTTest};
     use std::time::Duration;
 
     fn durations_from_nanos(nanos: &[u64]) -> Vec<Duration> {
@@ -220,8 +220,8 @@ mod stats_tests {
 
 #[cfg(test)]
 mod report_tests {
-    use criterion_hypothesis::{BenchmarkComparison, Reporter, SampleStats, TerminalReporter};
-    use criterion_hypothesis_core::stats::{Side, TestResult};
+    use hypobench::{BenchmarkComparison, Reporter, SampleStats, TerminalReporter};
+    use hypobench_core::stats::{Side, TestResult};
 
     fn make_comparison(
         name: &str,
@@ -305,8 +305,8 @@ mod report_tests {
 /// without requiring git worktrees or cargo builds.
 #[cfg(test)]
 mod harness_integration_tests {
-    use criterion_hypothesis::{run_with_urls, wait_for_health, HarnessHandle};
-    use criterion_hypothesis_harness::{run_harness_async, BenchmarkRegistry};
+    use hypobench::{run_with_urls, wait_for_health, HarnessHandle};
+    use hypobench_harness::{run_harness_async, BenchmarkRegistry};
     use std::time::{Duration, Instant};
 
     /// Find a free port for testing.

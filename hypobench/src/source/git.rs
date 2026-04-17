@@ -5,7 +5,7 @@ use super::{SourceError, SourceProvider};
 
 /// A source provider that uses git worktrees to prepare baseline and candidate sources.
 ///
-/// This provider creates worktrees at `.criterion-hypothesis/{baseline,candidate}` relative
+/// This provider creates worktrees at `.hypobench/{baseline,candidate}` relative
 /// to the repository root. Each worktree checks out the specified commit or branch.
 #[derive(Debug)]
 pub struct GitWorktreeProvider {
@@ -48,7 +48,7 @@ impl GitWorktreeProvider {
 
     /// Get the base directory for worktrees.
     fn worktree_base(&self) -> PathBuf {
-        self.repo_root.join(".criterion-hypothesis")
+        self.repo_root.join(".hypobench")
     }
 
     /// Get the path for the baseline worktree.
@@ -159,7 +159,7 @@ impl SourceProvider for GitWorktreeProvider {
         self.remove_worktree(&self.baseline_path())?;
         self.remove_worktree(&self.candidate_path())?;
 
-        // Remove the .criterion-hypothesis directory if it's empty
+        // Remove the .hypobench directory if it's empty
         let worktree_base = self.worktree_base();
         if worktree_base.exists() {
             if let Ok(entries) = std::fs::read_dir(&worktree_base) {
@@ -183,15 +183,15 @@ mod tests {
 
         assert_eq!(
             provider.worktree_base(),
-            PathBuf::from("/test/repo/.criterion-hypothesis")
+            PathBuf::from("/test/repo/.hypobench")
         );
         assert_eq!(
             provider.baseline_path(),
-            PathBuf::from("/test/repo/.criterion-hypothesis/baseline")
+            PathBuf::from("/test/repo/.hypobench/baseline")
         );
         assert_eq!(
             provider.candidate_path(),
-            PathBuf::from("/test/repo/.criterion-hypothesis/candidate")
+            PathBuf::from("/test/repo/.hypobench/candidate")
         );
     }
 }

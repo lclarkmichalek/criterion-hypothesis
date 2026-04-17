@@ -1,13 +1,13 @@
 use char_counter::count_char;
-use criterion_hypothesis_harness::{run_harness, BenchmarkRegistry};
+use hypobench_harness::{run_harness, BenchmarkRegistry};
 use std::hint::black_box;
 use std::time::Instant;
 
 fn main() {
-    let port: u16 = std::env::var("CH_PORT")
-        .expect("CH_PORT environment variable must be set")
+    let port: u16 = std::env::var("HYPOBENCH_PORT")
+        .expect("HYPOBENCH_PORT environment variable must be set")
         .parse()
-        .expect("CH_PORT must be a valid port number");
+        .expect("HYPOBENCH_PORT must be a valid port number");
 
     let mut registry = BenchmarkRegistry::new();
 

@@ -1,10 +1,10 @@
 [package]
-name = "criterion-hypothesis-core"
+name = "hypobench-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Core types and utilities for criterion-hypothesis"
+description = "Core types and utilities for hypobench"
 
 [lib]
 path = "src/lib.rs"

@@ -1,4 +1,4 @@
-//! Configuration loading for criterion-hypothesis.
+//! Configuration loading for hypobench.
 //!
 //! Supports loading configuration from TOML files, with sensible defaults
 //! for all settings.
@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Top-level configuration for criterion-hypothesis.
+/// Top-level configuration for hypobench.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -112,7 +112,7 @@ impl Default for NetworkConfig {
 }
 
 /// Default configuration file name.
-const DEFAULT_CONFIG_FILE: &str = ".criterion-hypothesis.toml";
+const DEFAULT_CONFIG_FILE: &str = ".hypobench.toml";
 
 impl Config {
     /// Load configuration from a TOML file.
@@ -134,7 +134,7 @@ impl Config {
         Ok(config)
     }
 
-    /// Load configuration from the default file (`.criterion-hypothesis.toml`) or use defaults.
+    /// Load configuration from the default file (`.hypobench.toml`) or use defaults.
     ///
     /// This function searches for the configuration file in the current directory.
     /// If the file doesn't exist, default configuration is returned.
@@ -156,7 +156,7 @@ impl Config {
     /// Load configuration from the specified path, or try default locations.
     ///
     /// If a path is provided, loads from that path.
-    /// Otherwise, tries to load from `.criterion-hypothesis.toml` or uses defaults.
+    /// Otherwise, tries to load from `.hypobench.toml` or uses defaults.
     ///
     /// # Arguments
     ///
@@ -275,7 +275,7 @@ harness_timeout_ms = 60000
 
     #[test]
     fn test_load_or_default_no_file() {
-        // This test assumes .criterion-hypothesis.toml doesn't exist in the test directory
+        // This test assumes .hypobench.toml doesn't exist in the test directory
         // In practice, this would use the default config
         let config = Config::load_or_default();
         // Should not panic, either loads file or returns default
