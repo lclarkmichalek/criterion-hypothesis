@@ -635,11 +635,9 @@ impl Orchestrator {
                 "      warming up ({} iterations)... ",
                 self.warmup_iterations
             );
-            for _ in 0..self.warmup_iterations {
-                baseline.run_iteration(benchmark_name).await?;
-                sleep(self.interleave_interval).await;
-                candidate.run_iteration(benchmark_name).await?;
-                sleep(self.interleave_interval).await;
+            for i in 0..self.warmup_iterations {
+                self.run_interleaved_pair(benchmark_name, baseline, candidate, i % 2 == 0, None)
+                    .await?;
             }
             eprintln!("done");
         }
@@ -647,19 +645,14 @@ impl Orchestrator {
         // Collect interleaved samples
         eprint!("      collecting {} samples... ", self.sample_size);
         for i in 0..self.sample_size {
-            // Run baseline
-            let baseline_duration = baseline.run_iteration(benchmark_name).await?;
-            samples.add_baseline(baseline_duration);
-
-            // Wait between runs
-            sleep(self.interleave_interval).await;
-
-            // Run candidate
-            let candidate_duration = candidate.run_iteration(benchmark_name).await?;
-            samples.add_candidate(candidate_duration);
-
-            // Wait before next pair
-            sleep(self.interleave_interval).await;
+            self.run_interleaved_pair(
+                benchmark_name,
+                baseline,
+                candidate,
+                i % 2 == 0,
+                Some(&mut samples),
+            )
+            .await?;
 
             // Progress indicator every 10 samples
             if (i + 1) % 10 == 0 {
@@ -672,6 +665,42 @@ impl Orchestrator {
         eprintln!(" done");
 
         Ok(samples)
+    }
+
+    /// Run one baseline/candidate pair, alternating which side goes first.
+    ///
+    /// When `record_into` is `Some`, both durations are appended to the provided sample
+    /// collection. When `None`, the durations are discarded (used for warmup).
+    async fn run_interleaved_pair(
+        &self,
+        benchmark_name: &str,
+        baseline: &HarnessHandle,
+        candidate: &HarnessHandle,
+        baseline_first: bool,
+        mut record_into: Option<&mut BenchmarkSamples>,
+    ) -> Result<(), OrchestratorError> {
+        let (first_handle, second_handle, first_is_baseline) = if baseline_first {
+            (baseline, candidate, true)
+        } else {
+            (candidate, baseline, false)
+        };
+
+        let first_duration = first_handle.run_iteration(benchmark_name).await?;
+        sleep(self.interleave_interval).await;
+        let second_duration = second_handle.run_iteration(benchmark_name).await?;
+        sleep(self.interleave_interval).await;
+
+        if let Some(samples) = record_into.as_deref_mut() {
+            if first_is_baseline {
+                samples.add_baseline(first_duration);
+                samples.add_candidate(second_duration);
+            } else {
+                samples.add_candidate(first_duration);
+                samples.add_baseline(second_duration);
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -783,10 +812,17 @@ pub async fn run_with_urls(
         // Run warmup iterations (discarded)
         if warmup_iterations > 0 {
             eprint!("      warming up ({} iterations)... ", warmup_iterations);
-            for _ in 0..warmup_iterations {
-                baseline.run_iteration(benchmark_name).await?;
-                sleep(interleave_interval).await;
-                candidate.run_iteration(benchmark_name).await?;
+            for i in 0..warmup_iterations {
+                let baseline_first = i % 2 == 0;
+                if baseline_first {
+                    baseline.run_iteration(benchmark_name).await?;
+                    sleep(interleave_interval).await;
+                    candidate.run_iteration(benchmark_name).await?;
+                } else {
+                    candidate.run_iteration(benchmark_name).await?;
+                    sleep(interleave_interval).await;
+                    baseline.run_iteration(benchmark_name).await?;
+                }
                 sleep(interleave_interval).await;
             }
             eprintln!("done");
@@ -795,13 +831,20 @@ pub async fn run_with_urls(
         // Collect interleaved samples
         eprint!("      collecting {} samples... ", sample_size);
         for i in 0..sample_size {
-            let baseline_duration = baseline.run_iteration(benchmark_name).await?;
-            samples.add_baseline(baseline_duration);
-
-            sleep(interleave_interval).await;
-
-            let candidate_duration = candidate.run_iteration(benchmark_name).await?;
-            samples.add_candidate(candidate_duration);
+            let baseline_first = i % 2 == 0;
+            if baseline_first {
+                let baseline_duration = baseline.run_iteration(benchmark_name).await?;
+                sleep(interleave_interval).await;
+                let candidate_duration = candidate.run_iteration(benchmark_name).await?;
+                samples.add_baseline(baseline_duration);
+                samples.add_candidate(candidate_duration);
+            } else {
+                let candidate_duration = candidate.run_iteration(benchmark_name).await?;
+                sleep(interleave_interval).await;
+                let baseline_duration = baseline.run_iteration(benchmark_name).await?;
+                samples.add_candidate(candidate_duration);
+                samples.add_baseline(baseline_duration);
+            }
 
             sleep(interleave_interval).await;
 
