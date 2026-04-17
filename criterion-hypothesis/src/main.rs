@@ -74,9 +74,10 @@ async fn run_manual_mode(
         baseline_url,
         candidate_url,
         Duration::from_millis(config.network.harness_timeout_ms),
-        config.orchestration.warmup_iterations,
         config.orchestration.sample_size,
         Duration::from_millis(config.orchestration.interleave_interval_ms),
+        Duration::from_millis(config.orchestration.target_sample_ms),
+        config.orchestration.max_calibration_iters,
     )
     .await
     .context("Failed to run benchmarks with URLs")?;
@@ -156,9 +157,10 @@ async fn run_automatic_mode(
             candidate_build.binary_path,
             config.network.base_port,
             Duration::from_millis(config.network.harness_timeout_ms),
-            config.orchestration.warmup_iterations,
             config.orchestration.sample_size,
             Duration::from_millis(config.orchestration.interleave_interval_ms),
+            Duration::from_millis(config.orchestration.target_sample_ms),
+            config.orchestration.max_calibration_iters,
             cli.harness_output,
         );
 
@@ -185,9 +187,10 @@ async fn run_automatic_mode(
                 candidate_build.binary_path,
                 config.network.base_port,
                 Duration::from_millis(config.network.harness_timeout_ms),
-                config.orchestration.warmup_iterations,
                 config.orchestration.sample_size,
                 Duration::from_millis(config.orchestration.interleave_interval_ms),
+                Duration::from_millis(config.orchestration.target_sample_ms),
+                config.orchestration.max_calibration_iters,
                 cli.harness_output,
             );
 

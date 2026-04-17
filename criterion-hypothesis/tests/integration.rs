@@ -70,20 +70,22 @@ mod protocol_tests {
 
     #[test]
     fn test_run_iteration_request_roundtrip() {
-        let original = RunIterationRequest::new("my_benchmark");
+        let original = RunIterationRequest::new("my_benchmark", 7);
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: RunIterationRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.benchmark_id, "my_benchmark");
+        assert_eq!(deserialized.iterations, 7);
     }
 
     #[test]
     fn test_run_iteration_response_success_roundtrip() {
         let duration = Duration::from_micros(1234);
-        let original = RunIterationResponse::success(duration);
+        let original = RunIterationResponse::success(3, duration);
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: RunIterationResponse = serde_json::from_str(&json).unwrap();
 
         assert!(deserialized.success);
+        assert_eq!(deserialized.iterations, 3);
         assert_eq!(deserialized.duration(), duration);
         assert!(deserialized.error.is_none());
     }
@@ -110,7 +112,7 @@ mod protocol_tests {
     /// Test that the error field is omitted when None (for smaller JSON payloads).
     #[test]
     fn test_error_field_omitted_when_none() {
-        let response = RunIterationResponse::success(Duration::from_nanos(100));
+        let response = RunIterationResponse::success(1, Duration::from_nanos(100));
         let json = serde_json::to_string(&response).unwrap();
         assert!(!json.contains("error"));
     }
@@ -314,11 +316,16 @@ mod harness_integration_tests {
     }
 
     /// Create a test registry with a simple benchmark.
+    ///
+    /// The benchmark sleeps `delay_micros` once per inner iteration, so the
+    /// returned elapsed scales linearly with the requested iteration count.
     fn create_test_registry(delay_micros: u64) -> BenchmarkRegistry {
         let mut registry = BenchmarkRegistry::new();
-        registry.register("test_bench", move || {
+        registry.register("test_bench", move |n| {
             let start = Instant::now();
-            std::thread::sleep(Duration::from_micros(delay_micros));
+            for _ in 0..n {
+                std::thread::sleep(Duration::from_micros(delay_micros));
+            }
             start.elapsed()
         });
         registry
@@ -385,7 +392,8 @@ mod harness_integration_tests {
             .await
             .unwrap();
 
-        let duration = handle.run_iteration("test_bench").await.unwrap();
+        // Request a single inner iteration; duration reflects one 500µs sleep.
+        let duration = handle.run_iteration("test_bench", 1).await.unwrap();
 
         // Should be at least 500 microseconds
         assert!(
@@ -441,14 +449,16 @@ mod harness_integration_tests {
             .await
             .unwrap();
 
-        // Run comparison
+        // Run comparison. `target_sample_ms = 0` → calibration stops at n=1
+        // (one 500/1000µs sleep already exceeds target), keeping the test fast.
         let samples = run_with_urls(
             &baseline_url,
             &candidate_url,
             Duration::from_secs(5),
-            2,  // warmup
-            10, // sample size
-            Duration::from_millis(10),
+            10,                        // sample size
+            Duration::from_millis(10), // interleave interval
+            Duration::from_millis(0),  // target_sample: n=1 is enough
+            1_000,                     // max calibration iters
         )
         .await
         .unwrap();
@@ -495,11 +505,11 @@ mod harness_integration_tests {
 
         // Baseline has "bench_a"
         let mut baseline_registry = BenchmarkRegistry::new();
-        baseline_registry.register("bench_a", || Duration::from_micros(100));
+        baseline_registry.register("bench_a", |_n| Duration::from_micros(100));
 
         // Candidate has "bench_b" - different name!
         let mut candidate_registry = BenchmarkRegistry::new();
-        candidate_registry.register("bench_b", || Duration::from_micros(100));
+        candidate_registry.register("bench_b", |_n| Duration::from_micros(100));
 
         let baseline_task = tokio::spawn(async move {
             run_harness_async(baseline_registry, baseline_port)
@@ -530,9 +540,10 @@ mod harness_integration_tests {
             &baseline_url,
             &candidate_url,
             Duration::from_secs(5),
-            1,
             5,
             Duration::from_millis(10),
+            Duration::from_millis(0),
+            1_000,
         )
         .await;
 

@@ -37,10 +37,17 @@ pub struct HypothesisConfig {
 pub struct OrchestrationConfig {
     /// Interval in milliseconds between interleaved benchmark runs.
     pub interleave_interval_ms: u64,
-    /// Number of warmup iterations before collecting measurements.
-    pub warmup_iterations: u32,
-    /// Number of samples to collect for each benchmark.
+    /// Number of samples to collect for each benchmark after calibration.
     pub sample_size: u32,
+    /// Target minimum elapsed time per sample, in milliseconds.
+    ///
+    /// Calibration picks an iteration count `n` such that one sample
+    /// (n inner iterations) takes at least this long. Larger values amortise
+    /// clock-read overhead at the cost of total wall time.
+    pub target_sample_ms: u64,
+    /// Safety cap on the iteration count chosen during calibration.
+    /// Prevents pathological benchmarks from exploding.
+    pub max_calibration_iters: u64,
 }
 
 /// Configuration for building benchmark binaries.
@@ -78,8 +85,9 @@ impl Default for OrchestrationConfig {
     fn default() -> Self {
         Self {
             interleave_interval_ms: 100,
-            warmup_iterations: 3,
             sample_size: 100,
+            target_sample_ms: 10,
+            max_calibration_iters: 1_000_000_000,
         }
     }
 }
@@ -178,8 +186,9 @@ mod tests {
         assert_eq!(config.hypothesis.confidence_level, 0.95);
         assert_eq!(config.hypothesis.minimum_effect_size, 1.0);
         assert_eq!(config.orchestration.interleave_interval_ms, 100);
-        assert_eq!(config.orchestration.warmup_iterations, 3);
         assert_eq!(config.orchestration.sample_size, 100);
+        assert_eq!(config.orchestration.target_sample_ms, 10);
+        assert_eq!(config.orchestration.max_calibration_iters, 1_000_000_000);
         assert_eq!(config.build.profile, "release");
         assert!(config.build.cargo_flags.is_empty());
         assert!(config.build.bench_targets.is_empty());
@@ -208,7 +217,7 @@ sample_size = 200
 
         // Default values
         assert_eq!(config.hypothesis.minimum_effect_size, 1.0);
-        assert_eq!(config.orchestration.warmup_iterations, 3);
+        assert_eq!(config.orchestration.target_sample_ms, 10);
         assert_eq!(config.build.profile, "release");
     }
 
@@ -221,8 +230,8 @@ minimum_effect_size = 2.5
 
 [orchestration]
 interleave_interval_ms = 50
-warmup_iterations = 5
 sample_size = 200
+target_sample_ms = 25
 
 [build]
 profile = "bench"
@@ -241,8 +250,8 @@ harness_timeout_ms = 60000
         assert_eq!(config.hypothesis.confidence_level, 0.99);
         assert_eq!(config.hypothesis.minimum_effect_size, 2.5);
         assert_eq!(config.orchestration.interleave_interval_ms, 50);
-        assert_eq!(config.orchestration.warmup_iterations, 5);
         assert_eq!(config.orchestration.sample_size, 200);
+        assert_eq!(config.orchestration.target_sample_ms, 25);
         assert_eq!(config.build.profile, "bench");
         assert_eq!(config.build.cargo_flags, vec!["--features", "test-feature"]);
         assert_eq!(config.network.base_port, 8000);

@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "criterion-hypothesis-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "colored",
  "serde",
@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "criterion-hypothesis-harness"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",

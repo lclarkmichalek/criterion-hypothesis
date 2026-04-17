@@ -1,5 +1,6 @@
 use char_counter::count_char;
 use criterion_hypothesis_harness::{run_harness, BenchmarkRegistry};
+use std::hint::black_box;
 use std::time::Instant;
 
 fn main() {
@@ -15,9 +16,11 @@ fn main() {
         let input: String = "a".repeat(size);
         let name = format!("char_counting/count_char/{}", size);
 
-        registry.register(name, move || {
+        registry.register(name, move |n| {
             let start = Instant::now();
-            let _ = count_char(&input, 'a');
+            for _ in 0..n {
+                black_box(count_char(black_box(&input), black_box('a')));
+            }
             start.elapsed()
         });
     }
