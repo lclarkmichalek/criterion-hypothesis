@@ -1,23 +1,22 @@
 [package]
-name = "criterion-hypothesis-harness"
+name = "hypobench-harness"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Custom harness runtime for criterion-hypothesis"
+description = "In-process HTTP harness for hypobench benchmarks"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-criterion-hypothesis-core = { version = "0.3.0", path = "../criterion-hypothesis-core" }
+hypobench-core = { version = "0.4.0", path = "../hypobench-core" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 axum.workspace = true
-criterion.workspace = true
 
 [dev-dependencies]
 tower.workspace = true

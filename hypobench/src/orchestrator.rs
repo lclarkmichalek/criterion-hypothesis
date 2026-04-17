@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use uuid::Uuid;
 
-use criterion_hypothesis_core::protocol::{
+use hypobench_core::protocol::{
     BenchmarkListResponse, ClaimRequest, ClaimResponse, HealthResponse, ReleaseRequest,
     RunIterationRequest, RunIterationResponse, ShutdownResponse, CLAIM_HEADER, PROTOCOL_VERSION,
 };
@@ -64,8 +64,8 @@ pub enum OrchestratorError {
     /// Harness reports a protocol version this orchestrator cannot talk to.
     #[error(
         "Protocol mismatch at {url}: orchestrator speaks v{expected}, harness speaks v{actual}. \
-         Update `criterion-hypothesis-harness` in the benchmarked project to a version that \
-         implements protocol v{expected} (typically by matching the `criterion-hypothesis` \
+         Update `hypobench-harness` in the benchmarked project to a version that \
+         implements protocol v{expected} (typically by matching the `hypobench` \
          CLI version), or downgrade the orchestrator to v{actual}."
     )]
     ProtocolVersionMismatch {
@@ -134,7 +134,7 @@ impl HarnessHandle {
         if let Some(label) = output_label {
             // Use tokio::process for async output streaming
             let mut child = TokioCommand::new(binary)
-                .env("CH_PORT", port.to_string())
+                .env("HYPOBENCH_PORT", port.to_string())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -184,7 +184,7 @@ impl HarnessHandle {
         } else {
             // Use std::process without output streaming
             let process = Command::new(binary)
-                .env("CH_PORT", port.to_string())
+                .env("HYPOBENCH_PORT", port.to_string())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()

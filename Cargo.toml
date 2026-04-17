@@ -1,12 +1,12 @@
 [workspace]
-members = ["criterion-hypothesis", "criterion-hypothesis-harness", "criterion-hypothesis-core"]
+members = ["hypobench", "hypobench-harness", "hypobench-core"]
 resolver = "2"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/lclarkmichalek/criterion-hypothesis"
+repository = "https://github.com/lclarkmichalek/hypobench"
 
 [workspace.dependencies]
 # Shared dependencies
@@ -29,9 +29,6 @@ statrs = "0.18"
 
 # Terminal output
 colored = "3.0"
-
-# Criterion integration
-criterion = "0.5"
 
 # Testing
 tempfile = "3.15"

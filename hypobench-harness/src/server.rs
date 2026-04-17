@@ -16,7 +16,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use criterion_hypothesis_core::protocol::{
+use hypobench_core::protocol::{
     BenchmarkListResponse, ClaimRequest, ClaimResponse, HealthResponse, ReleaseRequest,
     ReleaseResponse, RunIterationRequest, RunIterationResponse, ShutdownResponse, CLAIM_HEADER,
 };
@@ -263,7 +263,7 @@ fn build_router(state: Arc<AppState>) -> Router {
 /// # Example
 ///
 /// ```ignore
-/// use criterion_hypothesis_harness::{BenchmarkRegistry, run_harness};
+/// use hypobench_harness::{BenchmarkRegistry, run_harness};
 ///
 /// let mut registry = BenchmarkRegistry::new();
 /// registry.register("my_bench", || {

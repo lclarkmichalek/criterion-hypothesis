@@ -1,4 +1,4 @@
-//! Custom harness runtime for criterion-hypothesis
+//! Custom harness runtime for hypobench
 //!
 //! This replaces criterion's default harness with an HTTP-controlled one.
 //! The harness exposes benchmark functions via HTTP endpoints, allowing

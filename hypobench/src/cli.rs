@@ -1,11 +1,11 @@
-//! Command-line interface for criterion-hypothesis.
+//! Command-line interface for hypobench.
 
 use crate::config::Config;
 use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
-#[command(name = "criterion-hypothesis")]
+#[command(name = "hypobench")]
 #[command(about = "Statistically rigorous A/B testing of benchmarks across commits")]
 #[command(version)]
 pub struct Cli {
@@ -42,7 +42,7 @@ pub struct Cli {
     pub target_sample_ms: Option<u64>,
 
     /// Path to config file
-    #[arg(long, default_value = ".criterion-hypothesis.toml")]
+    #[arg(long, default_value = ".hypobench.toml")]
     pub config: String,
 
     /// Path to project within repo (for monorepos/subdirectories)
@@ -123,7 +123,7 @@ mod tests {
             confidence_level: None,
             sample_size: None,
             target_sample_ms: None,
-            config: ".criterion-hypothesis.toml".to_string(),
+            config: ".hypobench.toml".to_string(),
             project_path: None,
             bench: vec![],
             verbose: false,
@@ -153,7 +153,7 @@ mod tests {
             confidence_level: Some(0.90),
             sample_size: None,
             target_sample_ms: Some(5),
-            config: ".criterion-hypothesis.toml".to_string(),
+            config: ".hypobench.toml".to_string(),
             project_path: None,
             bench: vec![],
             verbose: false,
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_cli_parse() {
         let cli = Cli::parse_from([
-            "criterion-hypothesis",
+            "hypobench",
             "--baseline",
             "main",
             "--candidate",
@@ -193,20 +193,14 @@ mod tests {
 
     #[test]
     fn test_cli_parse_minimal() {
-        let cli = Cli::parse_from([
-            "criterion-hypothesis",
-            "--baseline",
-            "v1.0.0",
-            "--candidate",
-            "HEAD",
-        ]);
+        let cli = Cli::parse_from(["hypobench", "--baseline", "v1.0.0", "--candidate", "HEAD"]);
 
         assert_eq!(cli.baseline, Some("v1.0.0".to_string()));
         assert_eq!(cli.candidate, Some("HEAD".to_string()));
         assert_eq!(cli.confidence_level, None);
         assert_eq!(cli.sample_size, None);
         assert_eq!(cli.target_sample_ms, None);
-        assert_eq!(cli.config, ".criterion-hypothesis.toml");
+        assert_eq!(cli.config, ".hypobench.toml");
         assert!(!cli.verbose);
         assert!(!cli.is_manual_mode());
     }
@@ -214,7 +208,7 @@ mod tests {
     #[test]
     fn test_cli_parse_manual_mode() {
         let cli = Cli::parse_from([
-            "criterion-hypothesis",
+            "hypobench",
             "--baseline-url",
             "http://localhost:9100",
             "--candidate-url",
@@ -231,7 +225,7 @@ mod tests {
     #[test]
     fn test_cli_parse_bench_targets() {
         let cli = Cli::parse_from([
-            "criterion-hypothesis",
+            "hypobench",
             "--baseline",
             "main",
             "--candidate",
@@ -248,7 +242,7 @@ mod tests {
     #[test]
     fn test_cli_manual_mode_with_harness_output() {
         let cli = Cli::parse_from([
-            "criterion-hypothesis",
+            "hypobench",
             "--baseline-url",
             "http://localhost:9100",
             "--candidate-url",

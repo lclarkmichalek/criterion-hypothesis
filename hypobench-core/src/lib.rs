@@ -1,7 +1,7 @@
-//! Core types and utilities for criterion-hypothesis.
+//! Core types and utilities for hypobench.
 //!
-//! This crate provides shared types used by both the criterion-hypothesis CLI
-//! and the criterion-hypothesis-harness runtime, ensuring protocol compatibility.
+//! This crate provides shared types used by both the hypobench CLI
+//! and the hypobench-harness runtime, ensuring protocol compatibility.
 
 pub mod protocol;
 pub mod report;
