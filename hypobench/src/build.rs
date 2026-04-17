@@ -4,8 +4,10 @@
 //! It locates Cargo.toml, runs cargo build, and finds the resulting benchmark
 //! binary in the target directory.
 
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread;
 use thiserror::Error;
 
 /// Errors that can occur during benchmark building.
@@ -69,13 +71,17 @@ impl BuildManager {
     ///
     /// This function:
     /// 1. Verifies that Cargo.toml exists in the source path
-    /// 2. Runs `cargo build --profile {profile} --benches` with any additional flags
+    /// 2. Runs `cargo build --profile {profile} --benches` with any additional flags,
+    ///    streaming cargo's stdout and stderr through to the orchestrator's stderr
+    ///    with a per-line `[cargo {label}] ...` prefix so users see build progress live.
     /// 3. Finds the benchmark binary in `target/{profile}/deps/`
     /// 4. Returns the path to the most recently modified benchmark binary
     ///
     /// # Arguments
     ///
     /// * `source_path` - Path to the root of the source tree containing Cargo.toml
+    /// * `label` - Short human label used to prefix cargo's output lines (e.g. "baseline",
+    ///   "candidate").
     ///
     /// # Errors
     ///
@@ -83,7 +89,7 @@ impl BuildManager {
     /// - Cargo.toml is not found
     /// - The build fails
     /// - No benchmark binary can be found after building
-    pub fn build(&self, source_path: &Path) -> Result<BuildResult, BuildError> {
+    pub fn build(&self, source_path: &Path, label: &str) -> Result<BuildResult, BuildError> {
         // 1. Verify Cargo.toml exists
         let cargo_toml = source_path.join("Cargo.toml");
         if !cargo_toml.exists() {
@@ -93,7 +99,7 @@ impl BuildManager {
         // 2. TODO: In future, inject harness dependency (for now, assume it exists)
 
         // 3. Run cargo build --profile {profile} --benches
-        self.run_cargo_build(source_path)?;
+        self.run_cargo_build(source_path, label)?;
 
         // 4. Find the benchmark binary in target/{profile}/deps/
         let binary_path = self.find_benchmark_binary(source_path)?;
@@ -105,18 +111,21 @@ impl BuildManager {
     /// Build a specific bench target from the source tree.
     ///
     /// Like `build()`, but runs `cargo build --bench <name>` instead of `--benches`,
-    /// allowing selective building when multiple bench targets exist.
+    /// allowing selective building when multiple bench targets exist. Cargo's output
+    /// is streamed live to the orchestrator's stderr with a `[cargo {label}] ...`
+    /// per-line prefix.
     pub fn build_bench(
         &self,
         source_path: &Path,
         bench_name: &str,
+        label: &str,
     ) -> Result<BuildResult, BuildError> {
         let cargo_toml = source_path.join("Cargo.toml");
         if !cargo_toml.exists() {
             return Err(BuildError::NoCargoToml(source_path.to_path_buf()));
         }
 
-        self.run_cargo_build_bench(source_path, bench_name)?;
+        self.run_cargo_build_bench(source_path, bench_name, label)?;
 
         let binary_path = self.find_benchmark_binary_for_target(source_path, Some(bench_name))?;
 
@@ -128,6 +137,7 @@ impl BuildManager {
         &self,
         source_path: &Path,
         bench_name: &str,
+        label: &str,
     ) -> Result<(), BuildError> {
         let mut cmd = Command::new("cargo");
         cmd.current_dir(source_path);
@@ -147,16 +157,12 @@ impl BuildManager {
             cmd.arg(flag);
         }
 
-        let output = cmd.output()?;
+        let status = spawn_and_stream(&mut cmd, label)?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
+        if !status.success() {
             return Err(BuildError::BuildFailed(format!(
-                "cargo build --bench {} failed:\n{}\n{}",
-                bench_name,
-                stdout.trim(),
-                stderr.trim()
+                "cargo build --bench {} exited with status {}",
+                bench_name, status
             )));
         }
 
@@ -164,7 +170,7 @@ impl BuildManager {
     }
 
     /// Run cargo build with the configured profile and flags.
-    fn run_cargo_build(&self, source_path: &Path) -> Result<(), BuildError> {
+    fn run_cargo_build(&self, source_path: &Path, label: &str) -> Result<(), BuildError> {
         let mut cmd = Command::new("cargo");
         cmd.current_dir(source_path);
         cmd.arg("build");
@@ -186,15 +192,12 @@ impl BuildManager {
             cmd.arg(flag);
         }
 
-        let output = cmd.output()?;
+        let status = spawn_and_stream(&mut cmd, label)?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
+        if !status.success() {
             return Err(BuildError::BuildFailed(format!(
-                "cargo build failed:\n{}\n{}",
-                stdout.trim(),
-                stderr.trim()
+                "cargo build exited with status {}",
+                status
             )));
         }
 
@@ -365,6 +368,55 @@ impl BuildManager {
     }
 }
 
+/// Spawn `cmd`, pipe its stdout and stderr, and forward every line to this
+/// process's stderr with a `[cargo {label}] ...` prefix. Returns the child's
+/// exit status once both streams have been drained and the child has exited.
+fn spawn_and_stream(
+    cmd: &mut Command,
+    label: &str,
+) -> Result<std::process::ExitStatus, BuildError> {
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+
+    let stdout_handle = child.stdout.take().map(|stdout| {
+        let label = label.to_string();
+        thread::spawn(move || forward_lines(stdout, &label))
+    });
+
+    let stderr_handle = child.stderr.take().map(|stderr| {
+        let label = label.to_string();
+        thread::spawn(move || forward_lines(stderr, &label))
+    });
+
+    let status = child.wait()?;
+
+    // Drain readers before returning so no output is lost after the child exits.
+    if let Some(handle) = stdout_handle {
+        let _ = handle.join();
+    }
+    if let Some(handle) = stderr_handle {
+        let _ = handle.join();
+    }
+
+    Ok(status)
+}
+
+/// Read from `reader` line by line, forwarding each line to stderr with a
+/// `[cargo {label}] ...` prefix. Errors while reading are logged through the
+/// same prefix and then terminate the loop; callers observe failure via the
+/// child's exit status rather than a propagated error.
+fn forward_lines<R: std::io::Read>(reader: R, label: &str) {
+    let buf = BufReader::new(reader);
+    for line in buf.lines() {
+        match line {
+            Ok(line) => eprintln!("[cargo {}] {}", label, line),
+            Err(err) => {
+                eprintln!("[cargo {}] <error reading output: {}>", label, err);
+                break;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,7 +446,7 @@ mod tests {
     #[test]
     fn test_no_cargo_toml_error() {
         let manager = BuildManager::new("release".to_string(), vec![]);
-        let result = manager.build(Path::new("/nonexistent/path"));
+        let result = manager.build(Path::new("/nonexistent/path"), "test");
 
         assert!(matches!(result, Err(BuildError::NoCargoToml(_))));
     }
@@ -402,7 +454,7 @@ mod tests {
     #[test]
     fn test_build_bench_no_cargo_toml_error() {
         let manager = BuildManager::new("release".to_string(), vec![]);
-        let result = manager.build_bench(Path::new("/nonexistent/path"), "my_bench");
+        let result = manager.build_bench(Path::new("/nonexistent/path"), "my_bench", "test");
 
         assert!(matches!(result, Err(BuildError::NoCargoToml(_))));
     }
