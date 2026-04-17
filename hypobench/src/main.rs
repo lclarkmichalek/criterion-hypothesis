@@ -142,10 +142,10 @@ async fn run_automatic_mode(
     if bench_targets.is_empty() {
         // Legacy: build all bench targets, pick newest binary
         let baseline_build = builder
-            .build(&baseline_build_path)
+            .build(&baseline_build_path, "baseline")
             .context("Failed to build baseline")?;
         let candidate_build = builder
-            .build(&candidate_build_path)
+            .build(&candidate_build_path, "candidate")
             .context("Failed to build candidate")?;
 
         eprintln!("Running benchmarks...");
@@ -171,11 +171,13 @@ async fn run_automatic_mode(
         // Build and run each bench target individually
         for bench_name in &bench_targets {
             eprintln!("Building bench target: {}", bench_name);
+            let baseline_label = format!("baseline {}", bench_name);
+            let candidate_label = format!("candidate {}", bench_name);
             let baseline_build = builder
-                .build_bench(&baseline_build_path, bench_name)
+                .build_bench(&baseline_build_path, bench_name, &baseline_label)
                 .with_context(|| format!("Failed to build baseline for bench '{}'", bench_name))?;
             let candidate_build = builder
-                .build_bench(&candidate_build_path, bench_name)
+                .build_bench(&candidate_build_path, bench_name, &candidate_label)
                 .with_context(|| format!("Failed to build candidate for bench '{}'", bench_name))?;
 
             eprintln!("Running benchmarks for: {}", bench_name);
