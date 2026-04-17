@@ -738,11 +738,10 @@ impl Orchestrator {
 
 /// Divide an elapsed duration by an iteration count to get per-iteration mean.
 fn per_iter_mean(elapsed: Duration, iters: u64) -> Duration {
-    if iters == 0 {
-        Duration::ZERO
-    } else {
-        Duration::from_nanos((elapsed.as_nanos() as u64) / iters)
-    }
+    (elapsed.as_nanos() as u64)
+        .checked_div(iters)
+        .map(Duration::from_nanos)
+        .unwrap_or(Duration::ZERO)
 }
 
 /// Calibrate iteration count so one sample meets the target elapsed duration.

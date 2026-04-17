@@ -115,11 +115,10 @@ impl RunIterationResponse {
     /// Per-iteration mean duration (`duration / iterations`).
     /// Returns `Duration::ZERO` if `iterations == 0`.
     pub fn per_iter(&self) -> Duration {
-        if self.iterations == 0 {
-            Duration::ZERO
-        } else {
-            Duration::from_nanos(self.duration_ns / self.iterations)
-        }
+        self.duration_ns
+            .checked_div(self.iterations)
+            .map(Duration::from_nanos)
+            .unwrap_or(Duration::ZERO)
     }
 }
 
