@@ -318,18 +318,21 @@ impl HarnessHandle {
         Ok(response.benchmarks)
     }
 
-    /// Run a single iteration of a benchmark.
+    /// Run a benchmark on this handle for `iterations` inner iterations.
     ///
-    /// # Arguments
-    ///
-    /// * `benchmark_id` - The identifier of the benchmark to run
+    /// Returns total elapsed across all iterations. Callers are responsible
+    /// for dividing by `iterations` to obtain a per-iteration mean.
     ///
     /// # Errors
     ///
     /// Returns an error if the iteration fails.
-    pub async fn run_iteration(&self, benchmark_id: &str) -> Result<Duration, OrchestratorError> {
+    pub async fn run_iteration(
+        &self,
+        benchmark_id: &str,
+        iterations: u64,
+    ) -> Result<Duration, OrchestratorError> {
         let url = format!("{}/run", self.base_url());
-        let request = RunIterationRequest::new(benchmark_id);
+        let request = RunIterationRequest::new(benchmark_id, iterations);
 
         let mut req = self.client.post(&url).json(&request);
         if let Some(nonce) = &self.claim_nonce {
@@ -685,9 +688,9 @@ impl Orchestrator {
             (candidate, baseline, false)
         };
 
-        let first_duration = first_handle.run_iteration(benchmark_name).await?;
+        let first_duration = first_handle.run_iteration(benchmark_name, 1).await?;
         sleep(self.interleave_interval).await;
-        let second_duration = second_handle.run_iteration(benchmark_name).await?;
+        let second_duration = second_handle.run_iteration(benchmark_name, 1).await?;
         sleep(self.interleave_interval).await;
 
         if let Some(samples) = record_into {
@@ -815,13 +818,13 @@ pub async fn run_with_urls(
             for i in 0..warmup_iterations {
                 let baseline_first = i % 2 == 0;
                 if baseline_first {
-                    baseline.run_iteration(benchmark_name).await?;
+                    baseline.run_iteration(benchmark_name, 1).await?;
                     sleep(interleave_interval).await;
-                    candidate.run_iteration(benchmark_name).await?;
+                    candidate.run_iteration(benchmark_name, 1).await?;
                 } else {
-                    candidate.run_iteration(benchmark_name).await?;
+                    candidate.run_iteration(benchmark_name, 1).await?;
                     sleep(interleave_interval).await;
-                    baseline.run_iteration(benchmark_name).await?;
+                    baseline.run_iteration(benchmark_name, 1).await?;
                 }
                 sleep(interleave_interval).await;
             }
@@ -833,15 +836,15 @@ pub async fn run_with_urls(
         for i in 0..sample_size {
             let baseline_first = i % 2 == 0;
             if baseline_first {
-                let baseline_duration = baseline.run_iteration(benchmark_name).await?;
+                let baseline_duration = baseline.run_iteration(benchmark_name, 1).await?;
                 sleep(interleave_interval).await;
-                let candidate_duration = candidate.run_iteration(benchmark_name).await?;
+                let candidate_duration = candidate.run_iteration(benchmark_name, 1).await?;
                 samples.add_baseline(baseline_duration);
                 samples.add_candidate(candidate_duration);
             } else {
-                let candidate_duration = candidate.run_iteration(benchmark_name).await?;
+                let candidate_duration = candidate.run_iteration(benchmark_name, 1).await?;
                 sleep(interleave_interval).await;
-                let baseline_duration = baseline.run_iteration(benchmark_name).await?;
+                let baseline_duration = baseline.run_iteration(benchmark_name, 1).await?;
                 samples.add_candidate(candidate_duration);
                 samples.add_baseline(baseline_duration);
             }
