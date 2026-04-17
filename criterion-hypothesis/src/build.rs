@@ -118,7 +118,7 @@ impl BuildManager {
 
         self.run_cargo_build_bench(source_path, bench_name)?;
 
-        let binary_path = self.find_benchmark_binary(source_path)?;
+        let binary_path = self.find_benchmark_binary_for_target(source_path, Some(bench_name))?;
 
         Ok(BuildResult { binary_path })
     }
@@ -206,6 +206,19 @@ impl BuildManager {
     /// Looks in `target/{profile}/deps/` for executable files matching the
     /// pattern `*bench*`. Returns the most recently modified binary.
     fn find_benchmark_binary(&self, source_path: &Path) -> Result<PathBuf, BuildError> {
+        self.find_benchmark_binary_for_target(source_path, None)
+    }
+
+    /// Find the benchmark binary for a specific target in the target directory.
+    ///
+    /// When `target_prefix` is provided, only files matching the Cargo bench binary
+    /// naming pattern for that target are considered: `{target_prefix}` or
+    /// `{target_prefix}-<hash>`.
+    fn find_benchmark_binary_for_target(
+        &self,
+        source_path: &Path,
+        target_prefix: Option<&str>,
+    ) -> Result<PathBuf, BuildError> {
         // Determine the target directory name based on profile
         let target_dir = self.target_dir_name();
         let deps_path = source_path.join("target").join(target_dir).join("deps");
@@ -215,7 +228,7 @@ impl BuildManager {
         }
 
         // Find all benchmark binaries
-        let binaries = self.find_benchmark_files(&deps_path)?;
+        let binaries = self.find_benchmark_files(&deps_path, target_prefix)?;
 
         if binaries.is_empty() {
             return Err(BuildError::NoBenchmarkBinary);
@@ -245,7 +258,11 @@ impl BuildManager {
     }
 
     /// Find benchmark executable files in the deps directory.
-    fn find_benchmark_files(&self, deps_path: &Path) -> Result<Vec<PathBuf>, BuildError> {
+    fn find_benchmark_files(
+        &self,
+        deps_path: &Path,
+        target_prefix: Option<&str>,
+    ) -> Result<Vec<PathBuf>, BuildError> {
         let entries = std::fs::read_dir(deps_path)?;
         let mut binaries = Vec::new();
 
@@ -264,7 +281,7 @@ impl BuildManager {
             };
 
             // Check if it matches the benchmark pattern
-            if !self.is_benchmark_binary(file_name, &path) {
+            if !self.is_benchmark_binary(file_name, &path, target_prefix) {
                 continue;
             }
 
@@ -276,12 +293,27 @@ impl BuildManager {
 
     /// Check if a file is a benchmark binary.
     ///
-    /// On Unix: executable files containing "bench" in the name, without .d extension
-    /// On Windows: .exe files containing "bench" in the name
+    /// On Unix: executable files without .d/.rmeta/.rlib extensions.
+    /// On Windows: .exe files with the same filtering.
+    ///
+    /// When `target_prefix` is provided, the file name must match the bench target's
+    /// Cargo output naming convention.
     #[allow(unused_variables)]
-    fn is_benchmark_binary(&self, file_name: &str, path: &Path) -> bool {
-        // Must contain "bench" in the name
-        if !file_name.contains("bench") {
+    fn is_benchmark_binary(
+        &self,
+        file_name: &str,
+        path: &Path,
+        target_prefix: Option<&str>,
+    ) -> bool {
+        if let Some(prefix) = target_prefix {
+            let matches_prefix =
+                file_name == prefix || file_name.starts_with(&format!("{prefix}-"));
+            if !matches_prefix {
+                return false;
+            }
+        }
+
+        if file_name.ends_with(".pdb") {
             return false;
         }
 
@@ -393,21 +425,36 @@ mod tests {
         // Make it executable
         std::fs::set_permissions(&bench_path, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        assert!(manager.is_benchmark_binary("my_benchmark-abc123", &bench_path));
+        assert!(manager.is_benchmark_binary(
+            "find_first_duplicate-abc123",
+            &bench_path,
+            Some("find_first_duplicate"),
+        ));
 
         // Create a .d file (should be rejected)
         let d_path = temp_dir.path().join("my_benchmark-abc123.d");
         std::fs::File::create(&d_path).unwrap();
-        assert!(!manager.is_benchmark_binary("my_benchmark-abc123.d", &d_path));
+        assert!(!manager.is_benchmark_binary(
+            "my_benchmark-abc123.d",
+            &d_path,
+            Some("my_benchmark"),
+        ));
 
-        // Create a file without "bench" in name (should be rejected)
-        let other_path = temp_dir.path().join("my_test-abc123");
+        // Create a file that doesn't match the requested target (should be rejected)
+        let other_path = temp_dir.path().join("deduplicate-abc123");
         {
             let mut file = std::fs::File::create(&other_path).unwrap();
             file.write_all(b"fake binary").unwrap();
         }
         std::fs::set_permissions(&other_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(!manager.is_benchmark_binary("my_test-abc123", &other_path));
+        assert!(!manager.is_benchmark_binary(
+            "deduplicate-abc123",
+            &other_path,
+            Some("find_first_duplicate"),
+        ));
+
+        // Without a target hint, any executable cargo artifact is eligible.
+        assert!(manager.is_benchmark_binary("deduplicate-abc123", &other_path, None));
     }
 
     #[cfg(unix)]
