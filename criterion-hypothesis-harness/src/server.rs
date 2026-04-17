@@ -82,15 +82,23 @@ async fn run_iteration(
         return response;
     }
 
-    match state.registry.run(&request.benchmark_id) {
+    if request.iterations == 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(RunIterationResponse::failure("iterations must be >= 1")),
+        )
+            .into_response();
+    }
+
+    match state.registry.run(&request.benchmark_id, request.iterations) {
         Some(duration) => {
             let count = state.iteration_count.fetch_add(1, Ordering::Relaxed) + 1;
             if count % LOG_INTERVAL == 0 {
-                eprintln!("[harness] {} iterations completed", count);
+                eprintln!("[harness] {} run calls completed", count);
             }
             (
                 StatusCode::OK,
-                Json(RunIterationResponse::success(duration)),
+                Json(RunIterationResponse::success(request.iterations, duration)),
             )
                 .into_response()
         }
@@ -322,7 +330,9 @@ mod tests {
 
     fn create_test_state() -> Arc<AppState> {
         let mut registry = BenchmarkRegistry::new();
-        registry.register("test_bench", || Duration::from_millis(42));
+        // `test_bench` reports a fixed total elapsed regardless of the
+        // requested iteration count, which is fine for these HTTP-level tests.
+        registry.register("test_bench", |_n| Duration::from_millis(42));
 
         let (shutdown_tx, _) = watch::channel(false);
 
@@ -393,7 +403,9 @@ mod tests {
                     .method("POST")
                     .uri("/run")
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"benchmark_id": "test_bench"}"#))
+                    .body(Body::from(
+                        r#"{"benchmark_id": "test_bench", "iterations": 7}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -406,8 +418,31 @@ mod tests {
             .unwrap();
         let result: RunIterationResponse = serde_json::from_slice(&body).unwrap();
         assert!(result.success);
+        assert_eq!(result.iterations, 7);
         assert_eq!(result.duration_ns, 42_000_000); // 42ms in nanoseconds
         assert!(result.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_run_iteration_zero_iterations_rejected() {
+        let state = create_test_state();
+        let app = build_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/run")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"benchmark_id": "test_bench", "iterations": 0}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -421,7 +456,9 @@ mod tests {
                     .method("POST")
                     .uri("/run")
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"benchmark_id": "nonexistent"}"#))
+                    .body(Body::from(
+                        r#"{"benchmark_id": "nonexistent", "iterations": 1}"#,
+                    ))
                     .unwrap(),
             )
             .await
