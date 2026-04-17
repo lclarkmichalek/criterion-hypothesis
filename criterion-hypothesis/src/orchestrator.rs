@@ -677,7 +677,7 @@ impl Orchestrator {
         baseline: &HarnessHandle,
         candidate: &HarnessHandle,
         baseline_first: bool,
-        mut record_into: Option<&mut BenchmarkSamples>,
+        record_into: Option<&mut BenchmarkSamples>,
     ) -> Result<(), OrchestratorError> {
         let (first_handle, second_handle, first_is_baseline) = if baseline_first {
             (baseline, candidate, true)
@@ -690,7 +690,7 @@ impl Orchestrator {
         let second_duration = second_handle.run_iteration(benchmark_name).await?;
         sleep(self.interleave_interval).await;
 
-        if let Some(samples) = record_into.as_deref_mut() {
+        if let Some(samples) = record_into {
             if first_is_baseline {
                 samples.add_baseline(first_duration);
                 samples.add_candidate(second_duration);
