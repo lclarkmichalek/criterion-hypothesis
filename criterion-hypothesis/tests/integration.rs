@@ -70,20 +70,22 @@ mod protocol_tests {
 
     #[test]
     fn test_run_iteration_request_roundtrip() {
-        let original = RunIterationRequest::new("my_benchmark");
+        let original = RunIterationRequest::new("my_benchmark", 7);
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: RunIterationRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.benchmark_id, "my_benchmark");
+        assert_eq!(deserialized.iterations, 7);
     }
 
     #[test]
     fn test_run_iteration_response_success_roundtrip() {
         let duration = Duration::from_micros(1234);
-        let original = RunIterationResponse::success(duration);
+        let original = RunIterationResponse::success(3, duration);
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: RunIterationResponse = serde_json::from_str(&json).unwrap();
 
         assert!(deserialized.success);
+        assert_eq!(deserialized.iterations, 3);
         assert_eq!(deserialized.duration(), duration);
         assert!(deserialized.error.is_none());
     }
@@ -110,7 +112,7 @@ mod protocol_tests {
     /// Test that the error field is omitted when None (for smaller JSON payloads).
     #[test]
     fn test_error_field_omitted_when_none() {
-        let response = RunIterationResponse::success(Duration::from_nanos(100));
+        let response = RunIterationResponse::success(1, Duration::from_nanos(100));
         let json = serde_json::to_string(&response).unwrap();
         assert!(!json.contains("error"));
     }
