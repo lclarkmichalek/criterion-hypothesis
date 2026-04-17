@@ -1,17 +1,41 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+/// Protocol version spoken by this crate.
+///
+/// Bump this integer whenever the wire format of any request/response changes
+/// in a way that is not forward- or backward-compatible. Orchestrators check
+/// the harness's reported version at connect time and refuse to proceed on
+/// mismatch so the failure surfaces as a clear upgrade instruction rather
+/// than a cryptic JSON parse error.
+///
+/// History:
+/// - `1` — original protocol (single `Fn() -> Duration` samples).
+/// - `2` — harness accepts `iterations` and returns total elapsed for a batch.
+pub const PROTOCOL_VERSION: u32 = 2;
+
+/// Default protocol version assumed when the harness doesn't report one.
+/// This is 1 so that a v2 orchestrator talking to a pre-versioning harness
+/// (which doesn't emit the field) is correctly identified as a v1 peer.
+fn default_protocol_version() -> u32 {
+    1
+}
+
 /// Health check response from the benchmark harness.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub status: String,
+    /// Protocol version the harness implements.
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: u32,
 }
 
 impl HealthResponse {
-    /// Create a healthy response.
+    /// Create a healthy response advertising this crate's protocol version.
     pub fn healthy() -> Self {
         Self {
             status: "healthy".to_string(),
+            protocol_version: PROTOCOL_VERSION,
         }
     }
 }
@@ -199,6 +223,25 @@ mod tests {
     fn test_health_response_healthy() {
         let response = HealthResponse::healthy();
         assert_eq!(response.status, "healthy");
+        assert_eq!(response.protocol_version, PROTOCOL_VERSION);
+    }
+
+    #[test]
+    fn test_health_response_missing_version_defaults_to_one() {
+        // A pre-versioning harness emits `{"status": "healthy"}` with no
+        // protocol_version field. serde must coerce that to version 1.
+        let legacy: HealthResponse = serde_json::from_str(r#"{"status":"healthy"}"#).unwrap();
+        assert_eq!(legacy.status, "healthy");
+        assert_eq!(legacy.protocol_version, 1);
+    }
+
+    #[test]
+    fn test_health_response_roundtrip_preserves_version() {
+        let response = HealthResponse::healthy();
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"protocol_version\""));
+        let parsed: HealthResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.protocol_version, PROTOCOL_VERSION);
     }
 
     #[test]

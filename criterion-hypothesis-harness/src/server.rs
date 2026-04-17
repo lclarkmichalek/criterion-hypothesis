@@ -90,7 +90,10 @@ async fn run_iteration(
             .into_response();
     }
 
-    match state.registry.run(&request.benchmark_id, request.iterations) {
+    match state
+        .registry
+        .run(&request.benchmark_id, request.iterations)
+    {
         Some(duration) => {
             let count = state.iteration_count.fetch_add(1, Ordering::Relaxed) + 1;
             if count % LOG_INTERVAL == 0 {

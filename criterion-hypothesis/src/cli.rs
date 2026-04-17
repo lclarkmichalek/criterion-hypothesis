@@ -37,9 +37,9 @@ pub struct Cli {
     #[arg(long)]
     pub sample_size: Option<u32>,
 
-    /// Number of warmup iterations
+    /// Target minimum elapsed per sample in milliseconds (calibration target)
     #[arg(long)]
-    pub warmup_iterations: Option<u32>,
+    pub target_sample_ms: Option<u64>,
 
     /// Path to config file
     #[arg(long, default_value = ".criterion-hypothesis.toml")]
@@ -77,8 +77,8 @@ impl Cli {
             config.orchestration.sample_size = sample_size;
         }
 
-        if let Some(warmup_iterations) = self.warmup_iterations {
-            config.orchestration.warmup_iterations = warmup_iterations;
+        if let Some(target_sample_ms) = self.target_sample_ms {
+            config.orchestration.target_sample_ms = target_sample_ms;
         }
     }
 }
@@ -97,7 +97,7 @@ mod tests {
             harness_output: false,
             confidence_level: Some(0.99),
             sample_size: Some(200),
-            warmup_iterations: Some(20),
+            target_sample_ms: Some(20),
             config: "custom.toml".to_string(),
             project_path: None,
             bench: vec![],
@@ -109,7 +109,7 @@ mod tests {
 
         assert_eq!(config.hypothesis.confidence_level, 0.99);
         assert_eq!(config.orchestration.sample_size, 200);
-        assert_eq!(config.orchestration.warmup_iterations, 20);
+        assert_eq!(config.orchestration.target_sample_ms, 20);
     }
 
     #[test]
@@ -122,7 +122,7 @@ mod tests {
             harness_output: false,
             confidence_level: None,
             sample_size: None,
-            warmup_iterations: None,
+            target_sample_ms: None,
             config: ".criterion-hypothesis.toml".to_string(),
             project_path: None,
             bench: vec![],
@@ -132,14 +132,14 @@ mod tests {
         let mut config = Config::default();
         let original_confidence = config.hypothesis.confidence_level;
         let original_sample_size = config.orchestration.sample_size;
-        let original_warmup = config.orchestration.warmup_iterations;
+        let original_target = config.orchestration.target_sample_ms;
 
         cli.apply_to_config(&mut config);
 
         // Values should remain unchanged
         assert_eq!(config.hypothesis.confidence_level, original_confidence);
         assert_eq!(config.orchestration.sample_size, original_sample_size);
-        assert_eq!(config.orchestration.warmup_iterations, original_warmup);
+        assert_eq!(config.orchestration.target_sample_ms, original_target);
     }
 
     #[test]
@@ -152,7 +152,7 @@ mod tests {
             harness_output: false,
             confidence_level: Some(0.90),
             sample_size: None,
-            warmup_iterations: Some(5),
+            target_sample_ms: Some(5),
             config: ".criterion-hypothesis.toml".to_string(),
             project_path: None,
             bench: vec![],
@@ -165,7 +165,7 @@ mod tests {
         // Only specified values should be overridden
         assert_eq!(config.hypothesis.confidence_level, 0.90);
         assert_eq!(config.orchestration.sample_size, 100); // Default unchanged
-        assert_eq!(config.orchestration.warmup_iterations, 5);
+        assert_eq!(config.orchestration.target_sample_ms, 5);
     }
 
     #[test]
@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(cli.candidate, Some("HEAD".to_string()));
         assert_eq!(cli.confidence_level, None);
         assert_eq!(cli.sample_size, None);
-        assert_eq!(cli.warmup_iterations, None);
+        assert_eq!(cli.target_sample_ms, None);
         assert_eq!(cli.config, ".criterion-hypothesis.toml");
         assert!(!cli.verbose);
         assert!(!cli.is_manual_mode());

@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use criterion_hypothesis_core::protocol::{
     BenchmarkListResponse, ClaimRequest, ClaimResponse, HealthResponse, ReleaseRequest,
-    RunIterationRequest, RunIterationResponse, ShutdownResponse, CLAIM_HEADER,
+    RunIterationRequest, RunIterationResponse, ShutdownResponse, CLAIM_HEADER, PROTOCOL_VERSION,
 };
 
 /// Errors that can occur during orchestration.
@@ -60,6 +60,19 @@ pub enum OrchestratorError {
     /// Failed to claim harness (already claimed by another orchestrator).
     #[error("Failed to claim harness: {0}")]
     ClaimError(String),
+
+    /// Harness reports a protocol version this orchestrator cannot talk to.
+    #[error(
+        "Protocol mismatch at {url}: orchestrator speaks v{expected}, harness speaks v{actual}. \
+         Update `criterion-hypothesis-harness` in the benchmarked project to a version that \
+         implements protocol v{expected} (typically by matching the `criterion-hypothesis` \
+         CLI version), or downgrade the orchestrator to v{actual}."
+    )]
+    ProtocolVersionMismatch {
+        url: String,
+        expected: u32,
+        actual: u32,
+    },
 }
 
 /// Handle to a running harness process (spawned by us).
@@ -425,12 +438,14 @@ pub struct Orchestrator {
     base_port: u16,
     /// Timeout for waiting for harnesses to become ready.
     timeout: Duration,
-    /// Number of warmup iterations to discard.
-    warmup_iterations: u32,
-    /// Number of samples to collect.
+    /// Number of samples to collect per benchmark after calibration.
     sample_size: u32,
     /// Interval between interleaved benchmark runs.
     interleave_interval: Duration,
+    /// Target minimum elapsed duration for a single sample.
+    target_sample: Duration,
+    /// Safety cap on iteration count chosen during calibration.
+    max_calibration_iters: u64,
     /// Whether to show harness stdout/stderr output.
     show_output: bool,
 }
@@ -476,9 +491,10 @@ impl Orchestrator {
     /// * `candidate_binary` - Path to the candidate harness binary
     /// * `base_port` - Base port for harness communication (baseline uses base_port, candidate uses base_port + 1)
     /// * `timeout` - Timeout for waiting for harnesses to become ready
-    /// * `warmup_iterations` - Number of warmup iterations to discard
-    /// * `sample_size` - Number of samples to collect
+    /// * `sample_size` - Number of samples to collect per benchmark after calibration
     /// * `interleave_interval` - Interval between interleaved benchmark runs
+    /// * `target_sample` - Target minimum elapsed for a single sample (calibration target)
+    /// * `max_calibration_iters` - Safety cap on the chosen iteration count
     /// * `show_output` - Whether to show harness stdout/stderr
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -486,9 +502,10 @@ impl Orchestrator {
         candidate_binary: PathBuf,
         base_port: u16,
         timeout: Duration,
-        warmup_iterations: u32,
         sample_size: u32,
         interleave_interval: Duration,
+        target_sample: Duration,
+        max_calibration_iters: u64,
         show_output: bool,
     ) -> Self {
         Self {
@@ -496,9 +513,10 @@ impl Orchestrator {
             candidate_binary,
             base_port,
             timeout,
-            warmup_iterations,
             sample_size,
             interleave_interval,
+            target_sample,
+            max_calibration_iters,
             show_output,
         }
     }
@@ -624,6 +642,12 @@ impl Orchestrator {
     }
 
     /// Collect interleaved samples for a single benchmark.
+    ///
+    /// Calibrates the iteration count on the baseline handle (geometric
+    /// doubling up to `target_sample`), then collects `sample_size` samples
+    /// at that fixed iteration count on both sides. Records per-iteration
+    /// means (total elapsed / n) so Welch's t-test operates on comparable
+    /// units regardless of the chosen `n`.
     async fn collect_benchmark_samples(
         &self,
         benchmark_name: &str,
@@ -632,28 +656,30 @@ impl Orchestrator {
     ) -> Result<BenchmarkSamples, OrchestratorError> {
         let mut samples = BenchmarkSamples::new(benchmark_name);
 
-        // Run warmup iterations (discarded)
-        if self.warmup_iterations > 0 {
-            eprint!(
-                "      warming up ({} iterations)... ",
-                self.warmup_iterations
-            );
-            for i in 0..self.warmup_iterations {
-                self.run_interleaved_pair(benchmark_name, baseline, candidate, i % 2 == 0, None)
-                    .await?;
-            }
-            eprintln!("done");
-        }
+        // Calibrate iteration count on baseline; reuse for candidate.
+        eprint!("      calibrating... ");
+        let iters = calibrate_iterations(
+            baseline,
+            benchmark_name,
+            self.target_sample,
+            self.max_calibration_iters,
+        )
+        .await?;
+        eprintln!("n={}", iters);
 
-        // Collect interleaved samples
-        eprint!("      collecting {} samples... ", self.sample_size);
+        // Collect interleaved samples at fixed `iters`.
+        eprint!(
+            "      collecting {} samples (n={})... ",
+            self.sample_size, iters
+        );
         for i in 0..self.sample_size {
             self.run_interleaved_pair(
                 benchmark_name,
                 baseline,
                 candidate,
                 i % 2 == 0,
-                Some(&mut samples),
+                iters,
+                &mut samples,
             )
             .await?;
 
@@ -672,15 +698,17 @@ impl Orchestrator {
 
     /// Run one baseline/candidate pair, alternating which side goes first.
     ///
-    /// When `record_into` is `Some`, both durations are appended to the provided sample
-    /// collection. When `None`, the durations are discarded (used for warmup).
+    /// Both durations are divided by `iters` and recorded as per-iteration
+    /// means.
+    #[allow(clippy::too_many_arguments)]
     async fn run_interleaved_pair(
         &self,
         benchmark_name: &str,
         baseline: &HarnessHandle,
         candidate: &HarnessHandle,
         baseline_first: bool,
-        record_into: Option<&mut BenchmarkSamples>,
+        iters: u64,
+        samples: &mut BenchmarkSamples,
     ) -> Result<(), OrchestratorError> {
         let (first_handle, second_handle, first_is_baseline) = if baseline_first {
             (baseline, candidate, true)
@@ -688,26 +716,69 @@ impl Orchestrator {
             (candidate, baseline, false)
         };
 
-        let first_duration = first_handle.run_iteration(benchmark_name, 1).await?;
+        let first_elapsed = first_handle.run_iteration(benchmark_name, iters).await?;
         sleep(self.interleave_interval).await;
-        let second_duration = second_handle.run_iteration(benchmark_name, 1).await?;
+        let second_elapsed = second_handle.run_iteration(benchmark_name, iters).await?;
         sleep(self.interleave_interval).await;
 
-        if let Some(samples) = record_into {
-            if first_is_baseline {
-                samples.add_baseline(first_duration);
-                samples.add_candidate(second_duration);
-            } else {
-                samples.add_candidate(first_duration);
-                samples.add_baseline(second_duration);
-            }
+        let first_per_iter = per_iter_mean(first_elapsed, iters);
+        let second_per_iter = per_iter_mean(second_elapsed, iters);
+
+        if first_is_baseline {
+            samples.add_baseline(first_per_iter);
+            samples.add_candidate(second_per_iter);
+        } else {
+            samples.add_candidate(first_per_iter);
+            samples.add_baseline(second_per_iter);
         }
 
         Ok(())
     }
 }
 
-/// Wait for a harness to become healthy, with retries.
+/// Divide an elapsed duration by an iteration count to get per-iteration mean.
+fn per_iter_mean(elapsed: Duration, iters: u64) -> Duration {
+    if iters == 0 {
+        Duration::ZERO
+    } else {
+        Duration::from_nanos((elapsed.as_nanos() as u64) / iters)
+    }
+}
+
+/// Calibrate iteration count so one sample meets the target elapsed duration.
+///
+/// Starts at `n = 1` and grows geometrically (up to 10× per step) until one
+/// call to the benchmark returns elapsed ≥ `target`, or until `max_iters`.
+/// Returns the chosen `n`.
+///
+/// The calibration runs only on the baseline handle; the same `n` is reused
+/// for candidate samples so that per-iteration means are directly comparable.
+async fn calibrate_iterations(
+    handle: &HarnessHandle,
+    benchmark_name: &str,
+    target: Duration,
+    max_iters: u64,
+) -> Result<u64, OrchestratorError> {
+    let mut n: u64 = 1;
+    loop {
+        let elapsed = handle.run_iteration(benchmark_name, n).await?;
+        if elapsed >= target || n >= max_iters {
+            return Ok(n);
+        }
+        // Pick next n so that elapsed * (next_n / n) is roughly target.
+        // Cap growth at 10× per step to avoid overshooting on very fast benches.
+        let elapsed_ns = elapsed.as_nanos().max(1) as f64;
+        let target_ns = target.as_nanos() as f64;
+        let scale = (target_ns / elapsed_ns).min(10.0);
+        let next = ((n as f64) * scale).ceil() as u64;
+        n = next.max(n + 1).min(max_iters);
+    }
+}
+
+/// Wait for a harness to become healthy, with retries. Also verifies that the
+/// harness reports a protocol version the orchestrator knows how to talk to.
+///
+/// Protocol mismatch is *not* retried — a v1 harness won't become v2 by waiting.
 pub async fn wait_for_health(
     harness: &HarnessHandle,
     timeout: Duration,
@@ -718,7 +789,16 @@ pub async fn wait_for_health(
 
     loop {
         match harness.health_check().await {
-            Ok(_) => return Ok(()),
+            Ok(response) => {
+                if response.protocol_version != PROTOCOL_VERSION {
+                    return Err(OrchestratorError::ProtocolVersionMismatch {
+                        url: harness.base_url().to_string(),
+                        expected: PROTOCOL_VERSION,
+                        actual: response.protocol_version,
+                    });
+                }
+                return Ok(());
+            }
             Err(e) if start.elapsed() < timeout => {
                 last_error = Some(e);
                 sleep(retry_interval).await;
@@ -747,22 +827,24 @@ pub async fn wait_for_health(
 /// * `baseline_url` - URL of the baseline harness (e.g., "http://localhost:9100")
 /// * `candidate_url` - URL of the candidate harness (e.g., "http://localhost:9101")
 /// * `timeout` - Timeout for waiting for harnesses to become healthy
-/// * `warmup_iterations` - Number of warmup iterations to discard
-/// * `sample_size` - Number of samples to collect
+/// * `sample_size` - Number of samples to collect per benchmark after calibration
 /// * `interleave_interval` - Interval between interleaved benchmark runs
+/// * `target_sample` - Target minimum elapsed for a single sample (calibration target)
+/// * `max_calibration_iters` - Safety cap on the iteration count chosen during calibration
 pub async fn run_with_urls(
     baseline_url: &str,
     candidate_url: &str,
     timeout: Duration,
-    warmup_iterations: u32,
     sample_size: u32,
     interleave_interval: Duration,
+    target_sample: Duration,
+    max_calibration_iters: u64,
 ) -> Result<Vec<BenchmarkSamples>, OrchestratorError> {
     // Connect to remote harnesses
     let mut baseline = HarnessHandle::connect(baseline_url)?;
     let mut candidate = HarnessHandle::connect(candidate_url)?;
 
-    // Wait for health checks
+    // Wait for health checks (also verifies protocol version)
     eprint!("  Waiting for baseline harness... ");
     wait_for_health(&baseline, timeout).await?;
     eprintln!("ready");
@@ -812,44 +894,40 @@ pub async fn run_with_urls(
 
         let mut samples = BenchmarkSamples::new(benchmark_name);
 
-        // Run warmup iterations (discarded)
-        if warmup_iterations > 0 {
-            eprint!("      warming up ({} iterations)... ", warmup_iterations);
-            for i in 0..warmup_iterations {
-                let baseline_first = i % 2 == 0;
-                if baseline_first {
-                    baseline.run_iteration(benchmark_name, 1).await?;
-                    sleep(interleave_interval).await;
-                    candidate.run_iteration(benchmark_name, 1).await?;
-                } else {
-                    candidate.run_iteration(benchmark_name, 1).await?;
-                    sleep(interleave_interval).await;
-                    baseline.run_iteration(benchmark_name, 1).await?;
-                }
-                sleep(interleave_interval).await;
-            }
-            eprintln!("done");
-        }
+        eprint!("      calibrating... ");
+        let iters = calibrate_iterations(
+            &baseline,
+            benchmark_name,
+            target_sample,
+            max_calibration_iters,
+        )
+        .await?;
+        eprintln!("n={}", iters);
 
-        // Collect interleaved samples
-        eprint!("      collecting {} samples... ", sample_size);
+        eprint!("      collecting {} samples (n={})... ", sample_size, iters);
         for i in 0..sample_size {
             let baseline_first = i % 2 == 0;
-            if baseline_first {
-                let baseline_duration = baseline.run_iteration(benchmark_name, 1).await?;
-                sleep(interleave_interval).await;
-                let candidate_duration = candidate.run_iteration(benchmark_name, 1).await?;
-                samples.add_baseline(baseline_duration);
-                samples.add_candidate(candidate_duration);
+            let (first_handle, second_handle, first_is_baseline) = if baseline_first {
+                (&baseline, &candidate, true)
             } else {
-                let candidate_duration = candidate.run_iteration(benchmark_name, 1).await?;
-                sleep(interleave_interval).await;
-                let baseline_duration = baseline.run_iteration(benchmark_name, 1).await?;
-                samples.add_candidate(candidate_duration);
-                samples.add_baseline(baseline_duration);
-            }
+                (&candidate, &baseline, false)
+            };
 
+            let first_elapsed = first_handle.run_iteration(benchmark_name, iters).await?;
             sleep(interleave_interval).await;
+            let second_elapsed = second_handle.run_iteration(benchmark_name, iters).await?;
+            sleep(interleave_interval).await;
+
+            let first_per_iter = per_iter_mean(first_elapsed, iters);
+            let second_per_iter = per_iter_mean(second_elapsed, iters);
+
+            if first_is_baseline {
+                samples.add_baseline(first_per_iter);
+                samples.add_candidate(second_per_iter);
+            } else {
+                samples.add_candidate(first_per_iter);
+                samples.add_baseline(second_per_iter);
+            }
 
             // Progress indicator every 10 samples
             if (i + 1) % 10 == 0 {
@@ -905,16 +983,27 @@ mod tests {
             PathBuf::from("/path/to/candidate"),
             9100,
             Duration::from_secs(30),
-            3,
             100,
             Duration::from_millis(100),
+            Duration::from_millis(10),
+            1_000_000_000,
             false,
         );
 
         assert_eq!(orchestrator.base_port, 9100);
         assert!(!orchestrator.show_output);
-        assert_eq!(orchestrator.warmup_iterations, 3);
         assert_eq!(orchestrator.sample_size, 100);
+        assert_eq!(orchestrator.target_sample, Duration::from_millis(10));
+        assert_eq!(orchestrator.max_calibration_iters, 1_000_000_000);
+    }
+
+    #[test]
+    fn test_per_iter_mean() {
+        assert_eq!(
+            per_iter_mean(Duration::from_nanos(1000), 10),
+            Duration::from_nanos(100)
+        );
+        assert_eq!(per_iter_mean(Duration::from_nanos(100), 0), Duration::ZERO);
     }
 
     #[test]
