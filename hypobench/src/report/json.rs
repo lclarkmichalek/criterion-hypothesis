@@ -2,7 +2,9 @@
 
 use std::io::Write;
 
-use super::{Report, ReportError};
+use hypobench_core::Report;
+
+use super::ReportError;
 
 /// A reporter that serializes a full `Report` (with metadata) as JSON.
 ///

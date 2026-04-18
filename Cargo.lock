@@ -552,6 +552,7 @@ version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
+ "colored",
  "hypobench-core",
  "hypobench-harness",
  "reqwest",
@@ -568,13 +569,11 @@ dependencies = [
 name = "hypobench-core"
 version = "0.5.0"
 dependencies = [
- "colored",
  "rand 0.9.4",
  "serde",
  "serde_json",
  "statrs",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]

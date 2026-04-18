@@ -2,8 +2,10 @@ use std::io::{self, Write};
 
 use colored::Colorize;
 
-use super::{BenchmarkComparison, ReportError, Reporter, SampleStats};
-use crate::stats::Side;
+use hypobench_core::stats::Side;
+use hypobench_core::{BenchmarkComparison, SampleStats};
+
+use super::{ReportError, Reporter};
 
 /// A reporter that outputs benchmark comparison results to the terminal.
 #[derive(Debug, Clone, Default)]
@@ -290,7 +292,7 @@ impl Reporter for TerminalReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stats::TestResult;
+    use hypobench_core::stats::TestResult;
 
     fn make_comparison(
         name: &str,

@@ -2,8 +2,10 @@
 
 use std::io::Write;
 
-use super::{BenchmarkComparison, Report, ReportError, SampleStats};
-use crate::stats::Side;
+use hypobench_core::stats::Side;
+use hypobench_core::{BenchmarkComparison, Report, SampleStats};
+
+use super::ReportError;
 
 /// A reporter that formats a `Report` as GitHub-flavored Markdown.
 ///
@@ -53,7 +55,11 @@ impl MarkdownReporter {
         writeln!(writer)?;
         let cfg = &report.metadata.config;
         writeln!(writer, "- Confidence level: {}", cfg.confidence_level)?;
-        writeln!(writer, "- Minimum effect size: {}%", cfg.minimum_effect_size)?;
+        writeln!(
+            writer,
+            "- Minimum effect size: {}%",
+            cfg.minimum_effect_size
+        )?;
         writeln!(writer, "- Sample size: {}", cfg.sample_size)?;
         writeln!(
             writer,
@@ -102,8 +108,7 @@ fn write_row(writer: &mut impl Write, cmp: &BenchmarkComparison) -> Result<(), R
     let change = format_change(cmp.test_result.effect_size);
     let ci = format!(
         "[{:+.2}%, {:+.2}%]",
-        -cmp.test_result.change_ci_high,
-        -cmp.test_result.change_ci_low
+        -cmp.test_result.change_ci_high, -cmp.test_result.change_ci_low
     );
     let p = format!("{:.4}", cmp.test_result.p_value);
     let result = classify(cmp);

@@ -22,9 +22,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_benchmarks(run_args: RunArgs) -> Result<()> {
-    run_args
-        .validate()
-        .map_err(|msg| anyhow::anyhow!(msg))?;
+    run_args.validate().map_err(|msg| anyhow::anyhow!(msg))?;
 
     let mut config = Config::load_or_default()?;
     run_args.apply_to_config(&mut config);
@@ -66,7 +64,7 @@ async fn run_benchmarks(run_args: RunArgs) -> Result<()> {
         let family_alpha = 1.0 - config.hypothesis.confidence_level;
         let mut results: Vec<_> = comparisons.iter().map(|c| c.test_result.clone()).collect();
         apply_bonferroni(&mut results, family_alpha);
-        for (c, updated) in comparisons.iter_mut().zip(results.into_iter()) {
+        for (c, updated) in comparisons.iter_mut().zip(results) {
             c.test_result = updated;
         }
         eprintln!(
@@ -81,7 +79,11 @@ async fn run_benchmarks(run_args: RunArgs) -> Result<()> {
     Ok(())
 }
 
-fn build_report(run_args: &RunArgs, config: &Config, comparisons: Vec<BenchmarkComparison>) -> Report {
+fn build_report(
+    run_args: &RunArgs,
+    config: &Config,
+    comparisons: Vec<BenchmarkComparison>,
+) -> Report {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

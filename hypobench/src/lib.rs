@@ -7,15 +7,16 @@ pub mod build;
 pub mod cli;
 pub mod config;
 pub mod orchestrator;
+pub mod report;
 pub mod source;
 
 // Re-export core types for convenience
 pub use hypobench_core::protocol;
 pub use hypobench_core::report::{
-    BenchmarkComparison, ConfigSnapshot, JsonReporter, MarkdownReporter, Report, ReportError,
-    ReportMetadata, Reporter, SampleStats, TerminalReporter,
+    BenchmarkComparison, ConfigSnapshot, Report, ReportMetadata, SampleStats,
 };
 pub use hypobench_core::stats::{apply_bonferroni, Side, StatisticalTest, TestResult, WelchTTest};
+pub use report::{JsonReporter, MarkdownReporter, ReportError, Reporter, TerminalReporter};
 
 // Re-export main types from this crate
 pub use build::BuildManager;
