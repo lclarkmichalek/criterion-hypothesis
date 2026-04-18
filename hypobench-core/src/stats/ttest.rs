@@ -12,12 +12,23 @@ use super::{Side, StatisticalTest, TestResult};
 pub struct WelchTTest {
     /// The confidence level for determining statistical significance (default: 0.95).
     pub confidence_level: f64,
+    /// Minimum absolute effect size (as a percentage, matching `TestResult::effect_size`)
+    /// required for a result to be flagged as statistically significant. Defaults to
+    /// `0.0` which preserves the pre-existing behaviour of gating solely on the p-value.
+    ///
+    /// When non-zero, a result whose |effect_size| falls below this threshold has its
+    /// `statistically_significant` flag forced to `false` and its `winner` cleared to
+    /// `None`, even if `p < alpha`. This avoids flagging tiny cross-binary differences
+    /// (branch-predictor drift, cache-line alignment, etc.) on large benchmark suites
+    /// where small p-values are easy to achieve with moderate sample sizes.
+    pub minimum_effect_size: f64,
 }
 
 impl Default for WelchTTest {
     fn default() -> Self {
         Self {
             confidence_level: 0.95,
+            minimum_effect_size: 0.0,
         }
     }
 }
@@ -35,7 +46,18 @@ impl WelchTTest {
             confidence_level > 0.0 && confidence_level < 1.0,
             "confidence_level must be between 0 and 1 (exclusive)"
         );
-        Self { confidence_level }
+        Self {
+            confidence_level,
+            minimum_effect_size: 0.0,
+        }
+    }
+
+    /// Set the minimum absolute effect size (percent) required for a result to count
+    /// as statistically significant. See [`Self::minimum_effect_size`].
+    pub fn with_minimum_effect_size(mut self, threshold: f64) -> Self {
+        assert!(threshold >= 0.0, "minimum_effect_size must be non-negative");
+        self.minimum_effect_size = threshold;
+        self
     }
 
     /// Calculate the sample mean of durations in nanoseconds.
@@ -118,17 +140,23 @@ impl StatisticalTest for WelchTTest {
                 0.0
             };
 
-            let winner = if mean1 > mean2 {
-                Some(Side::Candidate)
-            } else if mean2 > mean1 {
-                Some(Side::Baseline)
+            // Even with zero variance, the practical-significance gate applies:
+            // two samples that differ by 0.01% aren't meaningful signal.
+            let meaningful_diff = mean1 != mean2 && effect_size.abs() >= self.minimum_effect_size;
+
+            let winner = if meaningful_diff {
+                if mean1 > mean2 {
+                    Some(Side::Candidate)
+                } else {
+                    Some(Side::Baseline)
+                }
             } else {
                 None
             };
 
             return TestResult {
                 p_value: if mean1 == mean2 { 1.0 } else { 0.0 },
-                statistically_significant: mean1 != mean2,
+                statistically_significant: meaningful_diff,
                 effect_size,
                 confidence_level: self.confidence_level,
                 winner,
@@ -153,10 +181,6 @@ impl StatisticalTest for WelchTTest {
             Err(_) => 1.0, // Conservative fallback if distribution creation fails
         };
 
-        // Determine statistical significance
-        let alpha = 1.0 - self.confidence_level;
-        let statistically_significant = p_value < alpha;
-
         // Calculate effect size as percentage difference
         // Positive effect_size means candidate is faster (lower time)
         let effect_size = if mean1 != 0.0 {
@@ -164,6 +188,14 @@ impl StatisticalTest for WelchTTest {
         } else {
             0.0
         };
+
+        // Determine statistical significance. Two gates must pass:
+        //   1. p-value below alpha (standard Welch's test)
+        //   2. |effect_size| >= minimum_effect_size (practical-significance gate)
+        // The second gate is a no-op when `minimum_effect_size == 0.0` (default).
+        let alpha = 1.0 - self.confidence_level;
+        let statistically_significant =
+            p_value < alpha && effect_size.abs() >= self.minimum_effect_size;
 
         // Determine winner if statistically significant
         // Lower time is better, so:
@@ -279,5 +311,55 @@ mod tests {
 
         // Effect size should be approximately 50% (candidate 50% faster)
         assert!((result.effect_size - 50.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_minimum_effect_size_gate_blocks_tiny_effects() {
+        // Baseline ~1000ns, candidate ~1015ns — ~1.5% difference with low noise.
+        // Welch's will happily report p < 0.05 because SE is tiny, but the effect
+        // is practically meaningless. Applying a 2% gate must flip significance to
+        // false.
+        let baseline = durations_from_nanos(&[1000, 1001, 999, 1000, 1001, 999, 1000, 1001]);
+        let candidate = durations_from_nanos(&[1015, 1016, 1014, 1015, 1016, 1014, 1015, 1016]);
+
+        let ungated = WelchTTest::default().analyze(&baseline, &candidate);
+        assert!(
+            ungated.statistically_significant,
+            "without a gate, this tiny effect should look significant: p={}, effect={}%",
+            ungated.p_value, ungated.effect_size
+        );
+        assert!(ungated.effect_size.abs() < 2.0);
+
+        let gated = WelchTTest::new(0.95)
+            .with_minimum_effect_size(2.0)
+            .analyze(&baseline, &candidate);
+        assert!(
+            !gated.statistically_significant,
+            "gate should have blocked effect={}%",
+            gated.effect_size
+        );
+        assert!(gated.winner.is_none());
+        // p-value and effect_size are unchanged — gate only toggles the flags.
+        assert_eq!(gated.p_value, ungated.p_value);
+        assert_eq!(gated.effect_size, ungated.effect_size);
+    }
+
+    #[test]
+    fn test_minimum_effect_size_gate_passes_large_effects() {
+        // 50% difference. Should still be flagged significant with a 2% gate.
+        let baseline = durations_from_nanos(&[200, 200, 200, 200, 200]);
+        let candidate = durations_from_nanos(&[100, 100, 100, 100, 100]);
+
+        let result = WelchTTest::new(0.95)
+            .with_minimum_effect_size(2.0)
+            .analyze(&baseline, &candidate);
+        assert!(result.statistically_significant);
+        assert_eq!(result.winner, Some(Side::Candidate));
+    }
+
+    #[test]
+    #[should_panic(expected = "minimum_effect_size must be non-negative")]
+    fn test_invalid_minimum_effect_size() {
+        let _ = WelchTTest::default().with_minimum_effect_size(-1.0);
     }
 }
