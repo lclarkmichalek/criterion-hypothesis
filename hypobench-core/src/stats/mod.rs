@@ -1,14 +1,14 @@
 use std::time::Duration;
 
 /// Identifies which side of a comparison (baseline or candidate).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Side {
     Baseline,
     Candidate,
 }
 
 /// The result of a statistical comparison between baseline and candidate measurements.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TestResult {
     /// The p-value from the statistical test (probability of observing the difference by chance).
     pub p_value: f64,
