@@ -16,7 +16,7 @@ pub use hypobench_core::report::{
     BenchmarkComparison, ConfigSnapshot, Report, ReportMetadata, SampleStats,
 };
 pub use hypobench_core::stats::{apply_bonferroni, Side, StatisticalTest, TestResult, WelchTTest};
-pub use report::{JsonReporter, MarkdownReporter, ReportError, Reporter, TerminalReporter};
+pub use report::{GithubPrCommentReporter, JsonReporter, ReportError, Reporter, TerminalReporter};
 
 // Re-export main types from this crate
 pub use build::BuildManager;

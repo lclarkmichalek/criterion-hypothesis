@@ -19,17 +19,17 @@ pub enum ReportError {
 ///
 /// The `Reporter` trait is deliberately narrow — it sees only the per-benchmark
 /// comparisons, not the full `Report` (which also carries run metadata). The
-/// JSON and Markdown renderers expose their own top-level entry points that
+/// JSON and PR-comment renderers expose their own top-level entry points that
 /// take a `&Report`, because they need the metadata.
 pub trait Reporter: Send + Sync {
     fn report(&self, results: &[BenchmarkComparison]) -> Result<(), ReportError>;
 }
 
+mod github_pr_comment;
 mod json;
-mod markdown;
 mod terminal;
+pub use github_pr_comment::GithubPrCommentReporter;
 pub use json::JsonReporter;
-pub use markdown::MarkdownReporter;
 pub use terminal::TerminalReporter;
 
 #[cfg(test)]
@@ -103,13 +103,13 @@ mod json_reporter_tests {
 }
 
 #[cfg(test)]
-mod markdown_reporter_tests {
+mod github_pr_comment_tests {
     use hypobench_core::stats::{Side, TestResult};
     use hypobench_core::{
         BenchmarkComparison, ConfigSnapshot, Report, ReportMetadata, SampleStats,
     };
 
-    use super::MarkdownReporter;
+    use super::GithubPrCommentReporter;
 
     fn make_comparison(
         name: &str,
@@ -190,10 +190,10 @@ mod markdown_reporter_tests {
     }
 
     #[test]
-    fn markdown_renders_summary_and_table() {
+    fn renders_summary_and_pinned_sections_and_table() {
         let report = sample_report();
         let mut buf = Vec::new();
-        MarkdownReporter::new()
+        GithubPrCommentReporter::new()
             .write(&report, &mut buf)
             .expect("write");
         let out = String::from_utf8(buf).unwrap();
@@ -205,13 +205,19 @@ mod markdown_reporter_tests {
             "missing inconclusive count: {out}"
         );
 
+        assert!(out.contains("Regressions"), "missing regressions header");
+        assert!(out.contains("Improvements"), "missing improvements header");
+
+        // Full-table details block — auto-opened because there's a regression.
+        assert!(
+            out.contains("<details open>"),
+            "details should be open with regressions: {out}"
+        );
+        assert!(out.contains("<summary>Full results (3 benchmarks)</summary>"));
         assert!(out.contains("| Benchmark |"));
         assert!(out.contains("bench_fast"));
         assert!(out.contains("bench_slow"));
         assert!(out.contains("bench_same"));
-        assert!(out.contains("faster"));
-        assert!(out.contains("slower"));
-        assert!(out.contains("inconclusive"));
 
         assert!(out.contains("abc123"));
         assert!(out.contains("def456"));
@@ -219,11 +225,40 @@ mod markdown_reporter_tests {
     }
 
     #[test]
-    fn markdown_escapes_pipes_in_benchmark_names() {
+    fn details_stays_closed_when_no_regressions() {
+        let mut report = sample_report();
+        // Drop the Baseline-winner row so there are no regressions.
+        report
+            .comparisons
+            .retain(|c| !matches!(c.test_result.winner, Some(Side::Baseline)));
+
+        let mut buf = Vec::new();
+        GithubPrCommentReporter::new()
+            .write(&report, &mut buf)
+            .expect("write");
+        let out = String::from_utf8(buf).unwrap();
+
+        assert!(
+            !out.contains("Regressions"),
+            "no regressions header expected"
+        );
+        // The full-results details block should be present but closed.
+        assert!(
+            out.contains("<details>"),
+            "missing closed details tag: {out}"
+        );
+        assert!(
+            !out.contains("<details open>"),
+            "details should not be open: {out}"
+        );
+    }
+
+    #[test]
+    fn escapes_pipes_in_benchmark_names() {
         let mut report = sample_report();
         report.comparisons[0].name = "bench|weird".to_string();
         let mut buf = Vec::new();
-        MarkdownReporter::new()
+        GithubPrCommentReporter::new()
             .write(&report, &mut buf)
             .expect("write");
         let out = String::from_utf8(buf).unwrap();

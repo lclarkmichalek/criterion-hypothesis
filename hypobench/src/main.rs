@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use hypobench::{
     apply_bonferroni, run_with_urls, BenchmarkComparison, BuildManager, Cli, Command, Config,
-    ConfigSnapshot, GitWorktreeProvider, JsonReporter, MarkdownReporter, Orchestrator, Report,
-    ReportArgs, ReportFormat, ReportMetadata, Reporter, RunArgs, SampleStats, SourceProvider,
-    StatisticalTest, TerminalReporter, WelchTTest,
+    ConfigSnapshot, GitWorktreeProvider, GithubPrCommentReporter, JsonReporter, Orchestrator,
+    Report, ReportArgs, ReportFormat, ReportMetadata, Reporter, RunArgs, SampleStats,
+    SourceProvider, StatisticalTest, TerminalReporter, WelchTTest,
 };
 use std::io::Read;
 use std::path::Path;
@@ -156,10 +156,10 @@ fn render(format: &ReportFormat, report: &Report) -> Result<()> {
                 .report(&report.comparisons)
                 .context("terminal report failed")?;
         }
-        ReportFormat::Markdown => {
-            MarkdownReporter::new()
+        ReportFormat::GithubPrComment => {
+            GithubPrCommentReporter::new()
                 .write(report, &mut out)
-                .context("markdown report failed")?;
+                .context("github-pr-comment report failed")?;
         }
         ReportFormat::Json => {
             JsonReporter::new()

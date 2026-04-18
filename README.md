@@ -73,7 +73,7 @@ Options:
       --sample-size <SIZE>               Number of sample iterations per benchmark
       --warmup-iterations <N>            Number of warmup iterations
       --config <PATH>                    Path to config file [default: .hypobench.toml]
-      --format <FORMAT>                  Report format [default: terminal] [possible: terminal, markdown, json]
+      --format <FORMAT>                  Report format [default: terminal] [possible: terminal, github-pr-comment, json]
   -v, --verbose                          Verbose output
   -h, --help                             Print help
   -V, --version                          Print version
@@ -88,12 +88,12 @@ By default, hypobench writes a terminal-friendly table to stdout. Pass `--format
 hypobench --baseline main --candidate HEAD --format json > report.json
 
 # Re-render without re-running
-hypobench report --in report.json --format markdown > pr-comment.md
+hypobench report --in report.json --format github-pr-comment > pr-comment.md
 hypobench report --in report.json --format terminal
-hypobench report --in - --format markdown < report.json   # stdin also accepted
+hypobench report --in - --format github-pr-comment < report.json   # stdin also accepted
 ```
 
-The `hypobench report` subcommand consumes a JSON report and renders it in any supported format — useful for CI pipelines that want to produce both a step-summary table and a PR comment from a single benchmark run.
+The `hypobench report` subcommand consumes a JSON report and renders it in any supported format — useful for CI pipelines that want to produce both a step-summary table and a PR comment from a single benchmark run. The `github-pr-comment` format specializes for PRs: a summary line at the top, pinned regressions/improvements, and the full table tucked into a collapsible `<details>` block.
 
 ### Example Output
 

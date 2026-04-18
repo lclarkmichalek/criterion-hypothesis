@@ -97,7 +97,8 @@ pub struct ReportArgs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ReportFormat {
     Terminal,
-    Markdown,
+    /// GitHub PR comment: collapsible table, pinned regressions/improvements.
+    GithubPrComment,
     Json,
 }
 
@@ -225,12 +226,12 @@ mod tests {
             "--in",
             "results.json",
             "--format",
-            "markdown",
+            "github-pr-comment",
         ]);
         match cli.command {
             Some(Command::Report(args)) => {
                 assert_eq!(args.input, PathBuf::from("results.json"));
-                assert_eq!(args.format, ReportFormat::Markdown);
+                assert_eq!(args.format, ReportFormat::GithubPrComment);
             }
             _ => panic!("expected Report subcommand"),
         }
