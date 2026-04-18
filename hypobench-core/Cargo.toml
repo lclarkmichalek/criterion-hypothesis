@@ -13,8 +13,6 @@ path = "src/lib.rs"
 serde.workspace = true
 serde_json.workspace = true
 statrs.workspace = true
-colored.workspace = true
-thiserror.workspace = true
 rand.workspace = true
 
 [dev-dependencies]

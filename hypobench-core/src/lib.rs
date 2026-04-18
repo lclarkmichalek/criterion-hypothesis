@@ -12,5 +12,5 @@ pub use protocol::{
     BenchmarkListResponse, HealthResponse, RunIterationRequest, RunIterationResponse,
     ShutdownResponse,
 };
-pub use report::{BenchmarkComparison, ReportError, Reporter, SampleStats, TerminalReporter};
+pub use report::{BenchmarkComparison, ConfigSnapshot, Report, ReportMetadata, SampleStats};
 pub use stats::{Side, StatisticalTest, TestResult, WelchTTest};
