@@ -16,6 +16,12 @@ pub struct TestResult {
     pub statistically_significant: bool,
     /// Effect size as percent difference (positive = candidate is faster than baseline).
     pub effect_size: f64,
+    /// Lower bound of the bootstrap confidence interval on the relative mean change,
+    /// in percent. Same sign convention as `effect_size`.
+    pub change_ci_low: f64,
+    /// Upper bound of the bootstrap confidence interval on the relative mean change,
+    /// in percent. Same sign convention as `effect_size`.
+    pub change_ci_high: f64,
     /// The confidence level used for the test (e.g., 0.95 for 95% confidence).
     pub confidence_level: f64,
     /// The winner if statistically significant, None if no significant difference.
@@ -32,6 +38,7 @@ pub trait StatisticalTest: Send + Sync {
     fn analyze(&self, baseline: &[Duration], candidate: &[Duration]) -> TestResult;
 }
 
+pub mod bootstrap;
 mod ttest;
 pub use ttest::WelchTTest;
 
@@ -88,6 +95,8 @@ mod tests {
             p_value,
             statistically_significant: significant,
             effect_size: 5.0,
+            change_ci_low: 4.0,
+            change_ci_high: 6.0,
             confidence_level: 0.95,
             winner: if significant {
                 Some(Side::Candidate)

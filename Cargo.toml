@@ -26,6 +26,7 @@ toml = "0.8"
 
 # Statistics
 statrs = "0.18"
+rand = { version = "0.9", features = ["small_rng"] }
 
 # Terminal output
 colored = "3.0"

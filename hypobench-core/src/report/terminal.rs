@@ -137,16 +137,24 @@ impl TerminalReporter {
     fn print_header(&self, writer: &mut impl Write) -> io::Result<()> {
         writeln!(writer)?;
         let header = format!(
-            "{:<40} {:>24} {:>24} {:>12} {:>10} {:>14}",
-            "Benchmark", "Baseline", "Candidate", "Change", "p-value", "Result"
+            "{:<40} {:>24} {:>24} {:>12} {:>22} {:>10} {:>14}",
+            "Benchmark", "Baseline", "Candidate", "Change", "Change CI", "p-value", "Result"
         );
         if self.use_colors {
             writeln!(writer, "{}", header.bold())?;
         } else {
             writeln!(writer, "{}", header)?;
         }
-        writeln!(writer, "{}", "-".repeat(130))?;
+        writeln!(writer, "{}", "-".repeat(152))?;
         Ok(())
+    }
+
+    /// Format the bootstrap CI on the relative mean change.
+    fn format_change_ci(lo: f64, hi: f64) -> String {
+        // Sign convention: positive = candidate faster. In the "Change" column
+        // we flip the sign to match the percent-slower convention there, so do
+        // the same here for visual consistency.
+        format!("[{:+.2}%, {:+.2}%]", -hi, -lo)
     }
 
     /// Print a single benchmark row.
@@ -164,6 +172,10 @@ impl TerminalReporter {
         let baseline = Self::format_time_with_stddev(&comparison.baseline_stats);
         let candidate = Self::format_time_with_stddev(&comparison.candidate_stats);
         let change = self.format_change_colored(comparison);
+        let change_ci = Self::format_change_ci(
+            comparison.test_result.change_ci_low,
+            comparison.test_result.change_ci_high,
+        );
         let p_value = format!("{:.4}", comparison.test_result.p_value);
         let result = self.format_result(comparison);
 
@@ -185,12 +197,13 @@ impl TerminalReporter {
 
         writeln!(
             writer,
-            "{:<40} {:>24} {:>24} {:>width_change$}{} {:>10} {:>width_result$}{}",
+            "{:<40} {:>24} {:>24} {:>width_change$}{} {:>22} {:>10} {:>width_result$}{}",
             name,
             baseline,
             candidate,
             "",
             change,
+            change_ci,
             p_value,
             "",
             result,
@@ -223,7 +236,7 @@ impl TerminalReporter {
         }
 
         writeln!(writer)?;
-        writeln!(writer, "{}", "-".repeat(130))?;
+        writeln!(writer, "{}", "-".repeat(152))?;
 
         let summary_label = "Summary:";
         if self.use_colors {
@@ -307,6 +320,8 @@ mod tests {
                 p_value,
                 statistically_significant: p_value < 0.05,
                 effect_size,
+                change_ci_low: effect_size - 1.0,
+                change_ci_high: effect_size + 1.0,
                 confidence_level: 0.95,
                 winner,
                 baseline_mean_ns,
