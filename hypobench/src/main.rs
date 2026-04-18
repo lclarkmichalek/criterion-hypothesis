@@ -28,7 +28,8 @@ async fn main() -> Result<()> {
 
     // Analyze results
     eprintln!("Analyzing results...");
-    let test = WelchTTest::new(config.hypothesis.confidence_level);
+    let test = WelchTTest::new(config.hypothesis.confidence_level)
+        .with_minimum_effect_size(config.hypothesis.minimum_effect_size);
     let mut comparisons = Vec::new();
 
     for sample in samples {
