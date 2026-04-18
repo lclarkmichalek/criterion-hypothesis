@@ -28,8 +28,10 @@ pub trait Reporter: Send + Sync {
     fn report(&self, results: &[BenchmarkComparison]) -> Result<(), ReportError>;
 }
 
+mod json;
 mod schema;
 mod terminal;
+pub use json::JsonReporter;
 pub use schema::{ConfigSnapshot, Report, ReportMetadata};
 pub use terminal::TerminalReporter;
 
@@ -146,5 +148,71 @@ mod report_tests {
         assert_eq!(parsed.metadata.config.sample_size, 50);
         assert_eq!(parsed.comparisons.len(), 1);
         assert_eq!(parsed.comparisons[0].name, "bench_foo");
+    }
+}
+
+#[cfg(test)]
+mod json_reporter_tests {
+    use super::*;
+    use crate::stats::{Side, TestResult};
+
+    fn sample_report() -> Report {
+        Report {
+            schema_version: "1".to_string(),
+            metadata: ReportMetadata {
+                hypobench_version: "0.5.0".to_string(),
+                generated_at: "2026-04-18T10:00:00Z".to_string(),
+                baseline_ref: "abc123".to_string(),
+                candidate_ref: "def456".to_string(),
+                config: ConfigSnapshot {
+                    confidence_level: 0.99,
+                    minimum_effect_size: 2.0,
+                    sample_size: 50,
+                    correct_multiple_comparisons: true,
+                },
+            },
+            comparisons: vec![BenchmarkComparison {
+                name: "bench_foo".to_string(),
+                baseline_stats: SampleStats {
+                    mean_ns: 1000.0,
+                    std_dev_ns: 50.0,
+                    min_ns: 900,
+                    max_ns: 1100,
+                    sample_count: 50,
+                },
+                candidate_stats: SampleStats {
+                    mean_ns: 800.0,
+                    std_dev_ns: 40.0,
+                    min_ns: 720,
+                    max_ns: 880,
+                    sample_count: 50,
+                },
+                test_result: TestResult {
+                    p_value: 0.001,
+                    statistically_significant: true,
+                    effect_size: 20.0,
+                    change_ci_low: 18.0,
+                    change_ci_high: 22.0,
+                    confidence_level: 0.99,
+                    winner: Some(Side::Candidate),
+                    baseline_mean_ns: 1000.0,
+                    candidate_mean_ns: 800.0,
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn json_reporter_writes_pretty_valid_json() {
+        let report = sample_report();
+        let mut buf = Vec::new();
+        JsonReporter::new().write(&report, &mut buf).expect("write");
+        let out = String::from_utf8(buf).unwrap();
+
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+        assert_eq!(parsed["schema_version"], "1");
+        assert_eq!(parsed["metadata"]["baseline_ref"], "abc123");
+        assert_eq!(parsed["comparisons"][0]["name"], "bench_foo");
+        assert!(out.contains('\n'), "should be pretty-printed");
     }
 }
