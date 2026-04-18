@@ -65,10 +65,11 @@ impl GithubPrCommentReporter {
             writeln!(writer)?;
         }
 
-        // Full table, collapsed by default. Auto-open when there are regressions
-        // so reviewers see the context without having to click.
-        let open_attr = if regressions.is_empty() { "" } else { " open" };
-        writeln!(writer, "<details{open_attr}>")?;
+        // Full table, always collapsed. The pinned Regressions/Improvements
+        // sections above the fold already surface the noteworthy rows; the
+        // full table is a secondary reference that shouldn't force-scroll on
+        // every reviewer viewing the PR.
+        writeln!(writer, "<details>")?;
         writeln!(
             writer,
             "<summary>Full results ({total} benchmarks)</summary>"
@@ -76,12 +77,12 @@ impl GithubPrCommentReporter {
         writeln!(writer)?;
         writeln!(
             writer,
-            "| Benchmark | Baseline | Candidate | Change | {ci_pct:.0}% CI | p | Result |",
+            "| | Benchmark | Baseline | Candidate | Change | {ci_pct:.0}% CI | p |",
             ci_pct = report.metadata.config.confidence_level * 100.0
         )?;
         writeln!(
             writer,
-            "|-----------|----------|-----------|--------|--------|---|--------|"
+            "|---|-----------|----------|-----------|--------|--------|---|"
         )?;
         for cmp in &report.comparisons {
             write_row(writer, cmp)?;
@@ -149,11 +150,14 @@ fn classify(cmp: &BenchmarkComparison) -> Verdict {
     }
 }
 
-fn verdict_word(v: Verdict) -> &'static str {
+/// GitHub-flavoured emoji shortcode matching the Regressions/Improvements
+/// section headers, so the full table visually lines up with the above-the-fold
+/// summary. `:heavy_minus_sign:` is a neutral tick for inconclusive rows.
+fn verdict_emoji(v: Verdict) -> &'static str {
     match v {
-        Verdict::Faster => "faster",
-        Verdict::Slower => "slower",
-        Verdict::Inconclusive => "inconclusive",
+        Verdict::Faster => ":rocket:",
+        Verdict::Slower => ":warning:",
+        Verdict::Inconclusive => ":heavy_minus_sign:",
     }
 }
 
@@ -194,11 +198,11 @@ fn write_row(writer: &mut impl Write, cmp: &BenchmarkComparison) -> Result<(), R
         -cmp.test_result.change_ci_high, -cmp.test_result.change_ci_low
     );
     let p = format!("{:.4}", cmp.test_result.p_value);
-    let result = verdict_word(classify(cmp));
+    let emoji = verdict_emoji(classify(cmp));
 
     writeln!(
         writer,
-        "| {name} | {baseline} | {candidate} | {change} | {ci} | {p} | **{result}** |"
+        "| {emoji} | {name} | {baseline} | {candidate} | {change} | {ci} | {p} |"
     )?;
     Ok(())
 }
@@ -215,11 +219,12 @@ fn escape_backticks(s: &str) -> String {
 }
 
 fn format_stats(stats: &SampleStats) -> String {
-    format!(
-        "{} (± {})",
-        format_time(stats.mean_ns),
-        format_time(stats.std_dev_ns)
-    )
+    // Only the point estimate for the PR comment. The per-side ± σ adds noise
+    // to the table without being directly actionable — the Change CI column
+    // already tells the reader whether the observed difference is trustworthy.
+    // Std-dev is still preserved in the JSON report so a richer renderer (e.g.
+    // an HTML dashboard) can surface it if needed.
+    format_time(stats.mean_ns)
 }
 
 fn format_time(ns: f64) -> String {

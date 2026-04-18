@@ -208,16 +208,34 @@ mod github_pr_comment_tests {
         assert!(out.contains("Regressions"), "missing regressions header");
         assert!(out.contains("Improvements"), "missing improvements header");
 
-        // Full-table details block — auto-opened because there's a regression.
+        // Full-table details block is always collapsed — reviewers click to expand.
         assert!(
-            out.contains("<details open>"),
-            "details should be open with regressions: {out}"
+            out.contains("<details>"),
+            "missing closed details tag: {out}"
+        );
+        assert!(
+            !out.contains("<details open>"),
+            "details should not be auto-opened even with regressions: {out}"
         );
         assert!(out.contains("<summary>Full results (3 benchmarks)</summary>"));
         assert!(out.contains("| Benchmark |"));
         assert!(out.contains("bench_fast"));
         assert!(out.contains("bench_slow"));
         assert!(out.contains("bench_same"));
+        // Emojis in the leftmost table column conveying verdict (the dedicated
+        // Result column was dropped — the emoji now carries that signal).
+        assert!(
+            out.contains("| :rocket: | bench_fast"),
+            "missing rocket emoji on faster row: {out}"
+        );
+        assert!(
+            out.contains("| :warning: | bench_slow"),
+            "missing warning emoji on slower row: {out}"
+        );
+        assert!(
+            out.contains("| :heavy_minus_sign: | bench_same"),
+            "missing neutral emoji on inconclusive row: {out}"
+        );
 
         assert!(out.contains("abc123"));
         assert!(out.contains("def456"));
