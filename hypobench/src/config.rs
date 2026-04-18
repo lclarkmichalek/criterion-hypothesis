@@ -29,6 +29,11 @@ pub struct HypothesisConfig {
     pub confidence_level: f64,
     /// Minimum effect size (in percent) to consider practically significant.
     pub minimum_effect_size: f64,
+    /// Whether to apply Bonferroni correction for multiple comparisons across a
+    /// bench suite. When `true` (default) and there are 2+ benchmarks, each
+    /// test's effective α is `(1 - confidence_level) / N` instead of
+    /// `1 - confidence_level`, controlling family-wise false-positive rate.
+    pub correct_multiple_comparisons: bool,
 }
 
 /// Configuration for benchmark orchestration.
@@ -77,6 +82,7 @@ impl Default for HypothesisConfig {
         Self {
             confidence_level: 0.95,
             minimum_effect_size: 1.0, // 1% minimum effect size
+            correct_multiple_comparisons: true,
         }
     }
 }

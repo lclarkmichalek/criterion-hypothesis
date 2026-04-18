@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use hypobench::{
-    run_with_urls, BenchmarkComparison, BuildManager, Cli, Config, GitWorktreeProvider,
-    Orchestrator, Reporter, SampleStats, SourceProvider, StatisticalTest, TerminalReporter,
-    WelchTTest,
+    apply_bonferroni, run_with_urls, BenchmarkComparison, BuildManager, Cli, Config,
+    GitWorktreeProvider, Orchestrator, Reporter, SampleStats, SourceProvider, StatisticalTest,
+    TerminalReporter, WelchTTest,
 };
 use std::time::Duration;
 
@@ -43,6 +43,26 @@ async fn main() -> Result<()> {
             candidate_stats,
             test_result,
         });
+    }
+
+    // Apply Bonferroni multiple-comparisons correction across the whole family.
+    // Each test's effective α becomes (1 - confidence_level) / N, controlling
+    // family-wise false-positive rate at the nominal level rather than letting
+    // it scale with the number of benchmarks.
+    if config.hypothesis.correct_multiple_comparisons && comparisons.len() > 1 {
+        let family_alpha = 1.0 - config.hypothesis.confidence_level;
+        // Clone out the TestResults, apply the correction to the slice, copy back.
+        // Avoids nested-&mut slicing over the enclosing `BenchmarkComparison`s.
+        let mut results: Vec<_> = comparisons.iter().map(|c| c.test_result.clone()).collect();
+        apply_bonferroni(&mut results, family_alpha);
+        for (c, updated) in comparisons.iter_mut().zip(results.into_iter()) {
+            c.test_result = updated;
+        }
+        eprintln!(
+            "Applied Bonferroni correction: effective α = {:.2e} across {} benchmarks",
+            family_alpha / comparisons.len() as f64,
+            comparisons.len(),
+        );
     }
 
     // Report results
