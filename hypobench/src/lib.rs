@@ -14,7 +14,7 @@ pub use hypobench_core::protocol;
 pub use hypobench_core::report::{
     BenchmarkComparison, ReportError, Reporter, SampleStats, TerminalReporter,
 };
-pub use hypobench_core::stats::{Side, StatisticalTest, TestResult, WelchTTest};
+pub use hypobench_core::stats::{apply_bonferroni, Side, StatisticalTest, TestResult, WelchTTest};
 
 // Re-export main types from this crate
 pub use build::BuildManager;
