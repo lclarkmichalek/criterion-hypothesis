@@ -1,8 +1,20 @@
 use std::time::Duration;
 
+use rand::rngs::SmallRng;
+use rand::SeedableRng;
 use statrs::distribution::{ContinuousCDF, StudentsT};
 
+use super::bootstrap::bootstrap_change_ci;
 use super::{Side, StatisticalTest, TestResult};
+
+/// Seed used for the bootstrap RNG inside `WelchTTest::analyze`. Fixed so that
+/// results are reproducible on identical sample inputs across runs.
+const BOOTSTRAP_SEED: u64 = 0xC0FFEE;
+
+/// Number of bootstrap resamples to compute the change CI with. 10_000 is the
+/// conventional default for percentile bootstrap; enough to stabilise the tail
+/// percentile estimates without blowing up wall time (~ms per benchmark).
+const BOOTSTRAP_N_RESAMPLES: usize = 10_000;
 
 /// Welch's t-test for comparing two independent samples with potentially unequal variances.
 ///
@@ -118,6 +130,8 @@ impl StatisticalTest for WelchTTest {
                 p_value: 1.0,
                 statistically_significant: false,
                 effect_size: 0.0,
+                change_ci_low: 0.0,
+                change_ci_high: 0.0,
                 confidence_level: self.confidence_level,
                 winner: None,
                 baseline_mean_ns: mean1,
@@ -158,6 +172,9 @@ impl StatisticalTest for WelchTTest {
                 p_value: if mean1 == mean2 { 1.0 } else { 0.0 },
                 statistically_significant: meaningful_diff,
                 effect_size,
+                // Zero-variance case: no noise to bootstrap over; CI collapses to the point estimate.
+                change_ci_low: effect_size,
+                change_ci_high: effect_size,
                 confidence_level: self.confidence_level,
                 winner,
                 baseline_mean_ns: mean1,
@@ -211,10 +228,23 @@ impl StatisticalTest for WelchTTest {
             None
         };
 
+        // Non-parametric bootstrap CI on the relative mean change. Uses a fixed
+        // seed for reproducibility across runs on identical inputs.
+        let mut rng = SmallRng::seed_from_u64(BOOTSTRAP_SEED);
+        let (change_ci_low, change_ci_high) = bootstrap_change_ci(
+            baseline,
+            candidate,
+            BOOTSTRAP_N_RESAMPLES,
+            self.confidence_level,
+            &mut rng,
+        );
+
         TestResult {
             p_value,
             statistically_significant,
             effect_size,
+            change_ci_low,
+            change_ci_high,
             confidence_level: self.confidence_level,
             winner,
             baseline_mean_ns: mean1,

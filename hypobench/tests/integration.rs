@@ -251,6 +251,8 @@ mod report_tests {
                 p_value,
                 statistically_significant: p_value < 0.05,
                 effect_size,
+                change_ci_low: effect_size - 1.0,
+                change_ci_high: effect_size + 1.0,
                 confidence_level: 0.95,
                 winner,
                 baseline_mean_ns,
