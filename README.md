@@ -73,10 +73,27 @@ Options:
       --sample-size <SIZE>               Number of sample iterations per benchmark
       --warmup-iterations <N>            Number of warmup iterations
       --config <PATH>                    Path to config file [default: .hypobench.toml]
+      --format <FORMAT>                  Report format [default: terminal] [possible: terminal, markdown, json]
   -v, --verbose                          Verbose output
   -h, --help                             Print help
   -V, --version                          Print version
 ```
+
+### Reporting
+
+By default, hypobench writes a terminal-friendly table to stdout. Pass `--format json` to emit a versioned, machine-readable `Report` (schema version 1) with run metadata plus per-benchmark comparisons — suitable for archiving as a CI artifact or feeding a dashboard.
+
+```bash
+# Run once, produce JSON
+hypobench --baseline main --candidate HEAD --format json > report.json
+
+# Re-render without re-running
+hypobench report --in report.json --format markdown > pr-comment.md
+hypobench report --in report.json --format terminal
+hypobench report --in - --format markdown < report.json   # stdin also accepted
+```
+
+The `hypobench report` subcommand consumes a JSON report and renders it in any supported format — useful for CI pipelines that want to produce both a step-summary table and a PR comment from a single benchmark run.
 
 ### Example Output
 
