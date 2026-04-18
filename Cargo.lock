@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "hypobench"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "hypobench-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "colored",
  "rand 0.9.4",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "hypobench-harness"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "axum",
